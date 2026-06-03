@@ -1,64 +1,64 @@
 # steamos-bc250-restore
 
-Script di ripristino post-update per **SteamOS** su Lenovo Legion Go (AMD BC-250 / Cyan Skillfish).
+Post-update restoration script for **SteamOS** on AMD BC-250.
 
-Dopo ogni aggiornamento di SteamOS, è possibile che i servizi `bc250-smu-oc` e `cyan-skillfish-governor-smu` vengano rimossi o smettano di funzionare. Questi script ripristinano l'intera configurazione.
+After every SteamOS update, the `bc250-smu-oc` and `cyan-skillfish-governor-smu` services may be removed or stop working. These scripts restore the entire configuration.
 
 ---
 
-## Contenuto
+## Contents
 
-| File | Descrizione |
+| File | Description |
 |---|---|
-| `restore-bc250-steamos.sh` | Ripristino completo: verifica, reinstalla e ricrea la policy D-Bus |
-| `post-update-check.sh` | Controllo rapido stato servizi senza reinstallare |
-| `examples/overclock.conf.example` | Profilo overclock di esempio per bc250_smu_oc |
-| `examples/config.toml.example` | Config di esempio per cyan-skillfish-governor-smu |
+| `restore-bc250-steamos.sh` | Full restore: verify, reinstall, and recreate the D-Bus policy |
+| `post-update-check.sh` | Quick service status check without reinstalling |
+| `examples/overclock.conf.example` | Sample overclock profile for bc250_smu_oc |
+| `examples/config.toml.example` | Example config for cyan-skillfish-governor-smu |
 
 ---
 
-## Uso rapido
+## Quick Start
 
 ```bash
-# Clona il repo
+# Clone the repo
 git clone https://github.com/mrsasy89/steamos-bc250-restore.git
 cd steamos-bc250-restore
 
-# Rendi gli script eseguibili
+# Make the scripts executable
 chmod +x restore-bc250-steamos.sh post-update-check.sh
 
-# Controlla lo stato dei servizi
+# Check service status
 ./post-update-check.sh
 
-# Ripristino completo (solo se i servizi mancano)
+# Full restore (only if services are missing)
 ./restore-bc250-steamos.sh
 ```
 
 ---
 
-## Prerequisiti
+## Prerequisites
 
-- SteamOS su Lenovo Legion Go (AMD BC-250 / Cyan Skillfish APU)
-- `git`, `python3`, `cargo` (Rust) installati
-- Connessione internet per scaricare le ultime versioni
+- SteamOS on AMD BC-250
+- `git`, `python3`, `cargo` (Rust) installed
+- Internet connection to download the latest versions
 
 ---
 
-## ⚠️ Profilo stabile consigliato
+## ⚠️ Recommended stable profile
 
-Questo repo **non applica automaticamente** valori di overclock o undervolt.
-Impostazioni errate possono danneggiare l'hardware.
+This repo **does not automatically apply** overclock or undervolt values.
+Incorrect settings can damage the hardware.
 
-**Profilo testato e stabile:**
-- `bc250_smu_oc`: **3700 MHz @ 1125 mV** (vedi `examples/overclock.conf.example`)
-- `cyan-skillfish-governor-smu`: GPU range **1000..=2000** (vedi `examples/config.toml.example`)
+**Tested and stable profile:**
+- `bc250_smu_oc`: **3700 MHz @ 1125 mV** (see `examples/overclock.conf.example`)
+- `cyan-skillfish-governor-smu`: GPU range **1000..=2000** (see `examples/config.toml.example`)
 
-Dopo ogni ripristino, copia manualmente i tuoi profili:
+After each reset, manually copy your profiles:
 
 ```bash
 # bc250_smu_oc
 cp examples/overclock.conf.example ~/overclock.conf
-# Modifica i valori se necessario, poi:
+# Edit the values if necessary, then:
 bc250-apply --install ~/overclock.conf
 
 # cyan-skillfish-governor-smu
@@ -68,31 +68,31 @@ sudo systemctl restart cyan-skillfish-governor-smu.service
 
 ---
 
-## Cosa viene ripristinato
+## What is restored
 
 ### `bc250_smu_oc`
-- Clona/aggiorna il repo upstream `bc250-collective/bc250_smu_oc`
-- Installa con `pipx` (fallback: `pip --break-system-packages`)
-- Ti avvisa di reimportare il profilo overclock stabile
+- Clone/update the upstream repo `bc250-collective/bc250_smu_oc`
+- Install with `pipx` (fallback: `pip --break-system-packages`)
+- Prompts you to reimport the stable overclock profile
 
 ### `cyan-skillfish-governor-smu`
-- Clona/aggiorna il ramo `smu` di `filippor/cyan-skillfish-governor`
-- Compila con `cargo build --release`
-- Installa il binario in `/usr/local/bin/`
-- Ricrea il file `.service` systemd
-- **Ricrea la policy D-Bus in `/usr/share/dbus-1/system.d/`** (fix per l'errore `AccessDenied`)
-- Ti avvisa di reimportare il tuo `config.toml` stabile
+- Clone/update the `smu` branch of `filippor/cyan-skillfish-governor`
+- Compile with `cargo build --release`
+- Install the binary in `/usr/local/bin/`
+- Regenerate the systemd `.service` file
+- **Regenerate the D-Bus policy in `/usr/share/dbus-1/system.d/`** (fix for the `AccessDenied` error)
+- Prompts you to reimport your stable `config.toml`
 
 ---
 
-## Note
+## Notes
 
-- Su SteamOS il filesystem root è read-only di default: usa `sudo steamos-readonly disable` prima di eseguire lo script se necessario.
-- Il file di policy D-Bus va in `/usr/share/dbus-1/system.d/` (verificato funzionante su SteamOS).
-- I file in `/etc/` vengono preservati dagli update di SteamOS, quelli in `/usr/` possono essere sovrascritti: lo script ricrea sempre la policy.
+- On SteamOS, the root filesystem is read-only by default: use `sudo steamos-readonly disable` before running the script if necessary.
+- The D-Bus policy file goes in `/usr/share/dbus-1/system.d/` (verified to work on SteamOS).
+- Files in `/etc/` are preserved by SteamOS updates; those in `/usr/` may be overwritten: the script always recreates the policy.
 
 ---
 
-## Contributi
+## Contributions
 
-PR benvenute. Issues per segnalare problemi su versioni specifiche di SteamOS o hardware diverso.
+PRs are welcome. Please open issues to report problems on specific SteamOS versions or different hardware.
