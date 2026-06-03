@@ -1,0 +1,31 @@
+# config.toml.example - cyan-skillfish-governor-smu
+# Configurazione stabile per Lenovo Legion Go (Cyan Skillfish GPU)
+# ATTENZIONE: Modifica solo se sai cosa stai facendo.
+#
+# Uso:
+#   sudo cp examples/config.toml.example /etc/cyan-skillfish-governor-smu/config.toml
+#   sudo systemctl restart cyan-skillfish-governor-smu.service
+#   # Verifica: sudo journalctl -u cyan-skillfish-governor-smu.service -n 20 --no-pager
+#
+# Profilo testato e stabile:
+#   GPU range: 1000..=2000 MHz
+
+# Frequenza minima GPU in MHz
+min_frequency = 1000
+
+# Frequenza massima GPU in MHz
+max_frequency = 2000
+
+# Metodo di lettura utilizzo GPU
+# Opzioni: busy-flag, smu
+gpu_usage_method = "busy-flag"
+
+# Metodo di impostazione frequenza GPU
+# Opzioni: smu, direct
+set_method = "smu"
+
+# Fix metriche utilizzo GPU (consigliato per Cyan Skillfish)
+gpu_usage_metrics_fix = true
+
+# Abilita servizio D-Bus per controllo esterno
+dbus_service = true

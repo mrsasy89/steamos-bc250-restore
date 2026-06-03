@@ -1,0 +1,28 @@
+# overclock.conf.example - bc250_smu_oc
+# Profilo overclock stabile testato su Lenovo Legion Go (AMD BC-250)
+# ATTENZIONE: Impostazioni errate possono danneggiare l'hardware.
+# Testa la stabilità prima di rendere persistente.
+#
+# Uso:
+#   cp examples/overclock.conf.example ~/overclock.conf
+#   # Modifica i valori se necessario
+#   bc250-apply --install ~/overclock.conf
+#
+# Profilo testato e stabile:
+#   CPU: 3700 MHz @ 1125 mV
+
+[cpu]
+# Frequenza massima CPU in MHz
+frequency = 3700
+
+# Tensione CPU in mV (VID)
+voltage = 1125
+
+# Mantieni i settaggi dopo il reboot (richiede --install)
+persistent = true
+
+# Commenta o rimuovi la sezione [power] per usare i valori di default
+[power]
+# TDP configurato manualmente dal Legion Space / profilo personalizzato
+# Modifica in base al tuo setup di raffreddamento
+tdp = 30
