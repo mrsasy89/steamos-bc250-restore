@@ -35,7 +35,7 @@ After every SteamOS update, services like `bc250-acpi-fix`, `bc250-smu-oc` and `
 | CPU frequency | **4000 MHz** (stock ~3493 MHz) |
 | CPU voltage | **1256 mV @ scale -27** |
 | GPU frequency | **1800–2000 MHz** (floor 1800 MHz) |
-| Temperature under load | **70°C** |
+| Temperature under load | **70°C** (77°C reached only during Vulkan shader processing)|
 | Active cores | 6 physical (12 threads) |
 | C-states disabled | C2 (350µs) + C3 (400µs) |
 | Stability | ✅ Confirmed stable in-game |
