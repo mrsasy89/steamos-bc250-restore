@@ -1,197 +1,261 @@
 # steamos-bc250-restore
 
-Post-update restoration script for **SteamOS** on AMD BC-250 / Cyan Skillfish.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-After every SteamOS update, the `bc250-smu-oc` and `cyan-skillfish-governor-smu` services may be removed or stop working. These scripts restore the entire configuration.
+Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU** (Legion Go Gen 1 and compatible devices).
+
+After every SteamOS update, services like `bc250-smu-oc` and `cyan-skillfish-governor-smu` may be removed or stop working. This repo contains the restore scripts, all tested configuration profiles, and the complete documentation of the optimization stack.
+
+> ⚠️ **Hardware warning:** The BC-250 is a custom AMD SoC. Incorrect overclock or voltage settings can **permanently brick the hardware**. Always follow the step-by-step guide and never exceed the documented voltage limits.
 
 ---
 
-## Contents
+## Tested Results
 
-| File | Description |
+| Metric | Value |
 |---|---|
-| `restore-bc250-steamos.sh` | Full restore: verify, reinstall, and recreate the D-Bus policy |
-| `post-update-check.sh` | Quick service status check without reinstalling |
-| `examples/overclock.conf.example` | Sample overclock profile for bc250_smu_oc |
-| `examples/config.toml.example` | Example config for cyan-skillfish-governor-smu |
+| CPU frequency | **4000 MHz** (stock ~3493 MHz) |
+| CPU voltage | **1256 mV @ scale -27** |
+| GPU frequency | **1800–2000 MHz** (floor 1800 MHz) |
+| Temperature under load | **< 70°C** |
+| Active cores | 6 physical (12 threads) |
+| C-states disabled | C2 (350µs) + C3 (400µs) |
+| Stability | ✅ Confirmed stable in-game |
 
 ---
 
-## Quick Start
+## Repository Structure
+
+```
+steamos-bc250-restore/
+├── restore-bc250-steamos.sh          # Full restore after SteamOS update
+├── post-update-check.sh              # Quick service status check
+├── examples/
+│   ├── acpi/                          # ACPI P-States & C-States override
+│   │   ├── README.md
+│   │   ├── SSDT-PST.dsl               # GPU P-States source
+│   │   └── SSDT-CST.dsl               # GPU C-States source
+│   ├── cpu-performance/               # CPU aggressive performance service
+│   │   ├── README.md
+│   │   └── cpu-performance.service
+│   ├── cyan-skillfish/                # GPU governor profiles
+│   │   ├── README.md
+│   │   └── config.toml.aggressive     # Tested aggressive profile v2
+│   ├── config.toml.example            # cyan-skillfish default reference
+│   └── overclock.conf.example         # bc250_smu_oc reference
+└── LICENSE
+```
+
+---
+
+## Full Optimization Stack
+
+Apply in this exact order.
+
+### Step 1 — bc250-acpi-fix
+
+Fixes the ACPI tables required for correct hardware initialization.
 
 ```bash
-# Clone the repo
+cd ~
+git clone https://github.com/bc250-collective/bc250-acpi-fix
+cd bc250-acpi-fix
+# Follow the upstream README
+```
+
+Verify after reboot:
+```bash
+dmesg | grep "Table Upgrade"
+# → SSDT-CST [HACK P_CST3] ✅
+# → SSDT-PST [HACK PSTATES] ✅
+
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
+# → 3200000 2550000 2325000 1960000 1820000 1600000 1271000 800000 ✅
+```
+
+---
+
+### Step 2 — cpu-performance.service
+
+Systemd service (runs as **root**) that locks all 12 cores at maximum frequency and disables high-latency idle states.
+
+```bash
+sudo curl -o /etc/systemd/system/cpu-performance.service \
+  https://raw.githubusercontent.com/mrsasy89/steamos-bc250-restore/main/examples/cpu-performance/cpu-performance.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpu-performance.service
+```
+
+What it does:
+
+| Optimization | Detail |
+|---|---|
+| `scaling_governor=performance` | All cores fixed at max, no downscaling |
+| `scaling_min_freq = max_freq` | Prevents any frequency drop |
+| AMD Core Performance Boost | Kept active |
+| C2 + C3 disabled | Eliminates 350–400µs wakeup penalty (confirmed states on BC-250) |
+| `sched_autogroup_enabled=0` | Lower interactive latency |
+| `sched_rt_runtime_us=980000` | Less scheduler throttling |
+| `sched_util_clamp_min=1024` | Forces full utilization hint |
+| IRQ pinning on core 0 | Cores 1–11 free for gaming |
+| THP=always | Fewer TLB misses |
+| `vm.swappiness=10` | Prefers RAM over swap |
+| `vm.compaction_proactiveness=0` | Eliminates memory compaction stutter |
+| `kernel.nmi_watchdog=0` | Fewer spurious interrupts |
+
+Verify:
+```bash
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+# → performance ✅
+```
+
+---
+
+### Step 3 — bc250-smu-oc (CPU Overclock)
+
+> ⚠️ **Critical:** Never exceed **1325 mV**. Tested safe limit is **1300 mV**. Going above without proper undervolting has permanently bricked hardware.
+
+Installed via `pipx`. The binary is at `~/.local/bin/bc250-detect`.
+
+**Important:** `sudo` does not include `~/.local/bin` in PATH. Always use the full path:
+
+```bash
+# Step 1: auto-detect your stable OC limit
+sudo /home/deck/.local/bin/bc250-detect --frequency 4000 --vid 1275 --keep
+
+# Expected output on this hardware:
+# Detected Active Cores: 012X456X
+# Final Result: 4000 MHz @ 1256 mV using scale -27
+
+# Step 2: install as permanent system service
+sudo /home/deck/.local/bin/bc250-apply --install ~/overclock.conf
+sudo systemctl enable --now bc250-smu-oc.service
+```
+
+Resulting `/etc/bc250-smu-oc.conf`:
+```ini
+[overclock]
+frequency = 4000
+scale = -27
+max_temperature = 90
+```
+
+Verify:
+```bash
+grep MHz /proc/cpuinfo | head -4
+# → all cores near 4000 MHz ✅
+```
+
+---
+
+### Step 4 — cyan-skillfish-governor-smu (GPU Governor)
+
+Controls the GPU directly via SMU. Runs as a **root system service**.
+
+> ⚠️ Always use `sudo systemctl` — **NOT** `systemctl --user`.
+
+> ⚠️ Do **not** write to `power_dpm_force_performance_level` or `pp_dpm_sclk` while this service is active. It bypasses the standard DPM sysfs interface entirely.
+
+Install the aggressive profile v2:
+```bash
+# Find the active config path
+sudo systemctl cat cyan-skillfish-governor-smu | grep -i config
+
+# Apply the tested profile
+sudo cp examples/cyan-skillfish/config.toml.aggressive /etc/cyan-skillfish-governor/config.toml
+
+sudo systemctl restart cyan-skillfish-governor-smu
+sudo systemctl status cyan-skillfish-governor-smu
+```
+
+Key settings in the aggressive profile:
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `min` frequency | **1800 MHz** | Prevents FPS dips during load transitions |
+| `max` frequency | 2000 MHz | Hardware maximum |
+| `down-events` | 60 | Resists downclocking (default: 20) |
+| `burst` ramp | 25 | Reaches 2000 MHz faster (default: 15) |
+| `upper` load target | 0.75 | Scales up earlier (default: 0.90) |
+| `lower` load target | 0.55 | Holds frequency longer (default: 0.75) |
+| `throttling` temp | 83°C | Hard thermal limit |
+
+GPU hardware info (confirmed via sysfs):
+```
+PCI_ID=1002:13FE  (AMD BC-250 / Cyan Skillfish)
+SCLK range: 1000–2000 MHz
+VDDC range: 700–1129 mV
+Default VDDC: 799 mV @ 1000 MHz
+```
+
+---
+
+## Active Services — Final Status
+
+| Service | Status | Notes |
+|---|---|---|
+| `bc250-smu-oc.service` | ✅ enabled + active | CPU 4000 MHz @ 1256 mV |
+| `cyan-skillfish-governor-smu.service` | ✅ enabled + active | GPU 1800–2000 MHz |
+| `cpu-performance.service` | ✅ enabled + active | All cores locked at max |
+| `bc250-acpi-fix` (initramfs) | ✅ loaded at boot | SSDT-PST + SSDT-CST |
+
+---
+
+## Post-Update Restore
+
+After every SteamOS update:
+
+```bash
 git clone https://github.com/mrsasy89/steamos-bc250-restore.git
 cd steamos-bc250-restore
-
-# Make the scripts executable
 chmod +x restore-bc250-steamos.sh post-update-check.sh
 
-# Check service status
+# Quick check
 ./post-update-check.sh
 
-# Full restore (only if services are missing)
+# Full restore if needed
 ./restore-bc250-steamos.sh
 ```
 
----
-
-## Prerequisites
-
-- SteamOS on AMD BC-250 / Cyan Skillfish
-- `git`, `python3`, `cargo` (Rust) installed
-- Internet connection to download the latest versions
+> Files in `/etc/` are preserved across SteamOS updates. Files in `/usr/` may be overwritten — the restore script always recreates them.
 
 ---
 
-## ⚠️ Recommended stable profile
+## Next Steps (Planned)
 
-This repo **does not automatically apply** overclock or undervolt values.
-Incorrect settings can damage the hardware.
-
-**Tested and stable profile:**
-- `bc250_smu_oc`: **3700 MHz @ 1125 mV** (see `examples/overclock.conf.example`)
-- `cyan-skillfish-governor-smu`: GPU range **1000..=2000** (see `examples/config.toml.example`)
-
-After each reset, manually copy your profiles:
-
-```bash
-# bc250_smu_oc
-cp examples/overclock.conf.example ~/overclock.conf
-# Edit the values if necessary, then:
-bc250-apply --install ~/overclock.conf
-
-# cyan-skillfish-governor-smu
-sudo cp examples/config.toml.example /etc/cyan-skillfish-governor-smu/config.toml
-sudo systemctl restart cyan-skillfish-governor-smu.service
-```
+- [ ] **40 CU unlock** — currently 36 CU active (4 disabled at firmware level)
+- [ ] Further SMU OC exploration after 40 CU baseline
 
 ---
 
-## GPU — bc250_smu_oc + cyan-skillfish-governor-smu
+## SteamOS Notes
 
-The BC-250 is not officially supported by the stock `amdgpu` driver: GPU locked, no SMU control, crashes in gaming mode.
-
-### What is restored
-
-#### `bc250_smu_oc`
-- Clone/update the upstream repo `bc250-collective/bc250_smu_oc`
-- Install with `pipx` (fallback: `pip --break-system-packages`)
-- Prompts you to reimport the stable overclock profile
-
-#### `cyan-skillfish-governor-smu`
-- Clone/update the `smu` branch of `filippor/cyan-skillfish-governor`
-- Compile with `cargo build --release`
-- Install the binary in `/usr/local/bin/`
-- Regenerate the systemd `.service` file
-- **Regenerate the D-Bus policy in `/usr/share/dbus-1/system.d/`** (fix for the `AccessDenied` error)
-- Prompts you to reimport your stable `config.toml`
-
-> ℹ️ After every SteamOS update, the D-Bus policy at `/usr/share/dbus-1/system.d/com.cyan.SkillFishGovernor.conf`
-> may be wiped by the read-only filesystem reset. The restore script always recreates it automatically.
+- Root filesystem is read-only by default: `sudo steamos-readonly disable` before running scripts if needed.
+- D-Bus policy file goes in `/usr/share/dbus-1/system.d/` (verified on SteamOS).
+- ACPI tables in `/etc/initcpio/acpi_override/` are preserved across updates.
+- SteamOS uses `steamcl.efi` as bootloader — GRUB-based ACPI injection does **not** work.
 
 ---
 
-## CPU — ACPI P-States & C-States (mkinitcpio override)
+## References
 
-### Problem
-The BC-250 / Cyan Skillfish BIOS ships with incomplete ACPI tables: no P-States and no C-States are exposed to the OS.
-This results in a fixed CPU frequency, no dynamic scaling, high power consumption, thermal throttling, and FPS drops.
-
-> ⚠️ **Important:** SteamOS uses `steamcl.efi` as its primary bootloader, which **completely bypasses GRUB**.
-> Injecting ACPI tables via a GRUB `custom.cfg` does **not** work on SteamOS.
-
-### Solution — mkinitcpio `acpi_override` hook
-
-| File | Description |
-|---|---|
-| `SSDT-PST.aml` | Custom P-States for BC-250 |
-| `SSDT-CST.aml` | Custom C-States for BC-250 |
-
-```bash
-# Copy compiled ACPI tables
-sudo cp ~/bc250-acpi-fix/*.aml /etc/initcpio/acpi_override/
-
-# Edit /etc/mkinitcpio.conf.d/20-steamdeck.conf
-# Add acpi_override as the FIRST entry in the HOOKS array:
-# HOOKS=(acpi_override ...)
-
-# Rebuild initramfs
-sudo mkinitcpio -p linux-neptune-618
-```
-
-### Verification after reboot
-
-```bash
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
-# Expected: 3200000 2550000 2325000 1960000 1820000 1600000 1271000 800000 ✅
-
-dmesg | grep "Table Upgrade"
-# Expected:
-# SSDT-CST [HACK P_CST3] ✅
-# SSDT-PST [HACK PSTATES] ✅
-```
+- [amd-bc250-docs](https://github.com/elektricM/amd-bc250-docs)
+- [cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor)
+- [cyan-skillfish-governor-smu (AUR)](https://aur.archlinux.org/packages/cyan-skillfish-governor-smu)
+- [bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc/)
+- [bc250-acpi-fix](https://github.com/bc250-collective/bc250-acpi-fix)
+- [BC-250 video reference](https://youtu.be/AUk0Dw5aOqM?si=QW2zY-8FVncbTA3f)
+- [steamos-repair-device-custom](https://github.com/InnoVision-Games/steamos-repair-device-custom)
 
 ---
 
-## CPU Governor — persistent `schedutil`
+## Contributing
 
-SteamOS does not persist the CPU governor across reboots and ignores `/etc/default/cpupower`.
-
-### Solution — oneshot systemd service
-
-Create `/etc/systemd/system/cpu-governor.service`:
-
-```ini
-[Unit]
-Description=Set CPU governor to schedutil
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $cpu; done'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now cpu-governor.service
-```
-
-> `schedutil` is the optimal governor when ACPI P-States are active: it scales CPU frequency
-> based on the Linux scheduler load, making it ideal for gaming workloads.
-
-### Verification
-
-```bash
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor | sort -u
-# Expected: schedutil (12/12 cores) ✅
-```
+PRs are welcome. Please open issues to report problems on specific SteamOS versions or different hardware configurations.
 
 ---
 
-## Active Services Status
+## License
 
-| Service | Status |
-|---|---|
-| `bc250-smu-oc.service` | ✅ enabled |
-| `cyan-skillfish-governor-smu.service` | ✅ enabled + running |
-| `cpu-governor.service` | ✅ enabled + active (exited) |
-| ACPI override (initramfs) | ✅ loaded at boot |
-
----
-
-## Notes
-
-- On SteamOS, the root filesystem is read-only by default: use `sudo steamos-readonly disable` before running the script if necessary.
-- The D-Bus policy file goes in `/usr/share/dbus-1/system.d/` (verified to work on SteamOS).
-- Files in `/etc/` are preserved by SteamOS updates; those in `/usr/` may be overwritten: the script always recreates the policy.
-- ACPI tables in `/etc/initcpio/acpi_override/` are preserved across updates since they live under `/etc/`.
-
----
-
-## Contributions
-
-PRs are welcome. Please open issues to report problems on specific SteamOS versions or different hardware.
+[MIT](LICENSE) © 2026 mrsasy89
