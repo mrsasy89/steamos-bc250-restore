@@ -1,14 +1,14 @@
-# cyan-skillfish-governor-smu — profilo AGGRESSIVO testato
-# Hardware: AMD BC-250 (Cyan Skillfish APU)
-# Testato stabile su SteamOS / Legion Go Gen1
+# cyan-skillfish-governor-smu — AGGRESSIVE profile v2 (tested stable)
+# Hardware: AMD BC-250 (Cyan Skillfish APU) on SteamOS / Legion Go Gen1
 #
-# Differenze rispetto al default:
-#   - burst ramp: 15 → 25  (raggiunge il picco più velocemente)
-#   - normal ramp: 2 → 4   (scaling su più reattivo)
-#   - burst-samples: 10 → 5 (riconosce il burst in metà tempo)
-#   - down-events: 20 → 30  (resiste più a lungo prima di scalare giù)
-#   - upper load target: 0.90 → 0.80 (scala su prima)
-#   - lower load target: 0.75 → 0.65 (mantiene freq alta più a lungo)
+# Changes from default:
+#   burst ramp:    15  → 25   (reaches peak frequency faster)
+#   normal ramp:   2   → 4    (more reactive upscaling)
+#   burst-samples: 10  → 5    (detects burst in half the time)
+#   down-events:   20  → 60   (resists downclocking much longer)
+#   upper target:  0.90→ 0.75 (scales up earlier)
+#   lower target:  0.75→ 0.55 (tolerates lower load before downclocking)
+#   min frequency: 1000→ 1800 (never drops below 1800MHz — eliminates FPS dips)
 
 [timing.intervals]
 sample = 250
@@ -26,7 +26,7 @@ set-method = "smu"
 enabled = true
 
 [frequency-range]
-min = 1000
+min = 1800
 max = 2000
 
 [timing.ramp-rates]
@@ -35,14 +35,14 @@ burst = 25
 
 [timing]
 burst-samples = 5
-down-events = 30
+down-events = 60
 
 [frequency-thresholds]
 adjust = 10
 
 [load-target]
-upper = 0.80
-lower = 0.65
+upper = 0.75
+lower = 0.55
 
 [temperature]
 throttling = 83
