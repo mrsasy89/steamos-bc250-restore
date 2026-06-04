@@ -2,6 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+ISO file for creating the live USB: 
+https://steamdeck-images.steamos.cloud/steamdeck/20251027.1000/?C=M&O=D 
+updated to version 3.9
+
+**Current System:**
+Name: SteamOS Holo 
+Version: 3.9 
+Build: 20260601.100
+Kernel: 6.18.33-valve1-1-nepture-618-gef57b8746c79
+Bios P3.00
+
 Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU**.
 
 After every SteamOS update, services like `bc250-acpi-fix`, `bc250-smu-oc` and `cyan-skillfish-governor-smu` may be removed or stop working. This repo contains the restore scripts, all tested configuration profiles, and the complete documentation of the optimization stack.
