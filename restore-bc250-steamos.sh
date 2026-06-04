@@ -2,7 +2,7 @@
 # restore-bc250-steamos.sh
 # Ripristino post-update SteamOS per bc250_smu_oc e cyan-skillfish-governor-smu
 # + Fix ACPI override per P-States/C-States su AMD BC-250 / Cyan Skillfish
-# Lenovo Legion Go - AMD BC-250 / Cyan Skillfish
+# AMD BC-250 / Cyan Skillfish su SteamOS
 # https://github.com/mrsasy89/steamos-bc250-restore
 
 set -euo pipefail
@@ -18,12 +18,11 @@ CSG_BIN="/usr/local/bin/cyan-skillfish-governor-smu"
 CSG_CONFIG_DIR="/etc/cyan-skillfish-governor-smu"
 CSG_SERVICE="/etc/systemd/system/cyan-skillfish-governor-smu.service"
 
-# ACPI fix
+# ACPI fix — usa hook nativo acpi_override di mkinitcpio
 ACPI_SRC_DIR="${HOME}/bc250-acpi-fix"
-ACPI_CPIO="/boot/acpi_override.cpio"
-GRUB_CUSTOM_CFG="/efi/EFI/steamos/custom.cfg"
-# UUID della partizione root BTRFS di SteamOS (da non modificare)
-STEAMOS_ROOT_UUID="a80835cd-019a-4e51-a668-941409c6b0ee"
+ACPI_INITCPIO_DIR="/etc/initcpio/acpi_override"
+MKINITCPIO_DROPIN="/etc/mkinitcpio.conf.d/20-steamdeck.conf"
+KERNEL_PRESET="/etc/mkinitcpio.d/linux-neptune-618.preset"
 
 # --- Colori output ---
 RED='\033[0;31m'
@@ -76,9 +75,16 @@ DBUSEOF
   ok "Policy D-Bus scritta in ${DBUS_POLICY_FILE}"
 }
 
-# --- Fix ACPI override (P-States / C-States BC-250) ---
+# ---------------------------------------------------------------------------
+# Fix ACPI override (P-States / C-States BC-250)
+#
+# NOTA: SteamOS usa steamcl.efi come bootloader primario che bypassa GRUB
+# completamente. L'unico metodo affidabile per caricare tabelle ACPI custom
+# è incorporarle direttamente nell'initramfs tramite l'hook nativo
+# 'acpi_override' di mkinitcpio, che le inserisce nel early uncompressed CPIO.
+# ---------------------------------------------------------------------------
 install_acpi_fix() {
-  log "Fix ACPI override per P-States/C-States BC-250"
+  log "Fix ACPI override per P-States/C-States BC-250 (via mkinitcpio hook)"
 
   # Verifica che esistano file .aml nella directory sorgente
   if [[ ! -d "$ACPI_SRC_DIR" ]] || ! ls "$ACPI_SRC_DIR"/*.aml >/dev/null 2>&1; then
@@ -87,66 +93,50 @@ install_acpi_fix() {
     return 0
   fi
 
-  # Costruisci il CPIO
-  log "Costruisco acpi_override.cpio"
-  local tmp_acpi
-  tmp_acpi="$(mktemp -d)"
-  mkdir -p "${tmp_acpi}/kernel/firmware/acpi"
-  cp "$ACPI_SRC_DIR"/*.aml "${tmp_acpi}/kernel/firmware/acpi/"
-  ( cd "$tmp_acpi" && find kernel | cpio -H newc --create > "${tmp_acpi}/acpi_override.cpio" )
-  local cpio_size
-  cpio_size=$(du -h "${tmp_acpi}/acpi_override.cpio" | cut -f1)
-  ok "CPIO creato: ${cpio_size}"
-
-  # Copia in /boot (BTRFS, accessibile da GRUB)
-  log "Copio acpi_override.cpio in /boot"
   sudo steamos-readonly disable
-  sudo install -m 644 "${tmp_acpi}/acpi_override.cpio" "$ACPI_CPIO"
-  sudo steamos-readonly enable
-  ok "Installato: ${ACPI_CPIO} ($(du -h $ACPI_CPIO | cut -f1))"
-  rm -rf "$tmp_acpi"
 
-  # Crea/aggiorna custom.cfg GRUB (menu nascosto, avvio silenzioso)
-  log "Aggiorno GRUB custom.cfg con voce ACPI fix (menu nascosto)"
+  # 1. Copia i file .aml in /etc/initcpio/acpi_override/ (path cercato dall'hook nativo)
+  log "Copio file .aml in ${ACPI_INITCPIO_DIR}"
+  sudo mkdir -p "$ACPI_INITCPIO_DIR"
+  sudo cp "$ACPI_SRC_DIR"/*.aml "$ACPI_INITCPIO_DIR/"
+  ok "File .aml copiati:"
+  ls -lh "$ACPI_INITCPIO_DIR"/*.aml
 
-  # Recupera il kernel attivo
-  local kernel_ver
-  kernel_ver=$(ls /boot/vmlinuz-* 2>/dev/null | head -1 | xargs basename | sed 's/vmlinuz-//')
-  if [[ -z "$kernel_ver" ]]; then
-    warn "Impossibile rilevare versione kernel — uso linux-neptune-618 come default"
-    kernel_ver="linux-neptune-618"
+  # 2. Aggiungi hook acpi_override come primo hook nel drop-in 20-steamdeck.conf
+  #    (che sovrascrive la lista HOOKS di mkinitcpio.conf e del preset)
+  if [[ -f "$MKINITCPIO_DROPIN" ]]; then
+    if grep -q "acpi_override" "$MKINITCPIO_DROPIN"; then
+      ok "Hook acpi_override già presente in ${MKINITCPIO_DROPIN}"
+    else
+      log "Aggiungo hook acpi_override al drop-in ${MKINITCPIO_DROPIN}"
+      sudo sed -i 's/^HOOKS=(/HOOKS=(acpi_override /' "$MKINITCPIO_DROPIN"
+      ok "Drop-in aggiornato: $(cat $MKINITCPIO_DROPIN)"
+    fi
+  else
+    warn "${MKINITCPIO_DROPIN} non trovato — aggiorno il preset direttamente"
+    if grep -q "acpi_override" "$KERNEL_PRESET"; then
+      ok "Hook acpi_override già presente nel preset"
+    else
+      sudo sed -i 's/^HOOKS=(/HOOKS=(acpi_override /' "$KERNEL_PRESET"
+      ok "Preset aggiornato"
+    fi
   fi
-  ok "Kernel rilevato: ${kernel_ver}"
 
-  sudo tee "$GRUB_CUSTOM_CFG" >/dev/null <<GRUBEOF
-# ACPI override BC-250 — generato da restore-bc250-steamos.sh
-# Menu nascosto: timeout=0. Per mostrare il menu al prossimo avvio:
-#   sudo grub-editenv /efi/EFI/steamos/grubenv set menu_show_once=y
-set timeout=0
-set timeout_style=hidden
+  # 3. Rigenera initramfs
+  log "Rigenero initramfs con hook acpi_override"
+  sudo mkinitcpio -p linux-neptune-618
 
-menuentry 'SteamOS + ACPI BC-250 Fix' --class steamos {
-       load_video
-       insmod gzio
-       insmod part_gpt
-       insmod btrfs
-       insmod search_part_uuid
-       search --no-floppy --part-uuid --set=root ${STEAMOS_ROOT_UUID}
-       steamenv_boot linux /boot/vmlinuz-${kernel_ver} console=tty1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.systemd.gpt_auto=no log_buf_len=4M amd_iommu=off amdgpu.lockup_timeout=5000,10000,10000,5000 ttm.pages_min=2097152 amdgpu.sched_hw_submission=4 amdgpu.dcdebugmask=0x20000 audit=0 fbcon=vc:4-6 fsck.mode=auto fsck.repair=preen crashkernel=256M crash_kexec_post_notifiers loglevel=3 quiet splash plymouth.ignore-serial-consoles
-       initrd /boot/amd-ucode.img /boot/acpi_override.cpio /boot/initramfs-${kernel_ver}.img
-}
-GRUBEOF
+  sudo steamos-readonly enable
 
-  ok "GRUB custom.cfg aggiornato: ${GRUB_CUSTOM_CFG}"
+  ok "Fix ACPI completato — tabelle caricate nel early uncompressed CPIO"
 
-  # Verifica P-States attivi (solo se siamo già bootati con il fix)
+  # 4. Verifica P-States attivi (solo se già bootati con il fix)
   if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies ]]; then
     local freqs
     freqs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies)
     ok "P-States attivi: ${freqs}"
   else
-    warn "P-States non rilevati — riavvia e seleziona 'SteamOS + ACPI BC-250 Fix' dal menu GRUB"
-    warn "Per mostrare il menu una volta: sudo grub-editenv /efi/EFI/steamos/grubenv set menu_show_once=y"
+    warn "P-States non ancora attivi — riavvia per caricare le nuove tabelle ACPI"
   fi
 }
 
@@ -261,11 +251,14 @@ verify_services() {
   journalctl -u cyan-skillfish-governor-smu.service -n 20 --no-pager 2>/dev/null || true
 
   echo ""
-  printf "${BLUE}--- P-States CPU (ACPI fix) --------------------------------${NC}\n"
+  printf "${BLUE}--- P-States / C-States CPU (ACPI override) ---------------${NC}\n"
   if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies ]]; then
     echo "Frequenze disponibili: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies)"
     echo "Governor attivo:       $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)"
     echo "C-States:              $(ls /sys/devices/system/cpu/cpu0/cpuidle/ 2>/dev/null | tr '\n' ' ')"
+    echo ""
+    printf "${BLUE}--- dmesg ACPI override -----------------------------------${NC}\n"
+    dmesg | grep -i "acpi.*override\|SSDT.*PST\|SSDT.*CST\|Table Upgrade" 2>/dev/null || true
   else
     warn "P-States non attivi — ACPI fix non ancora caricato (riavvio necessario)"
   fi
@@ -275,14 +268,14 @@ verify_services() {
 main() {
   echo ""
   printf "${BLUE}╔══════════════════════════════════════════════════════╗${NC}\n"
-  printf "${BLUE}║   SteamOS BC-250 Restore - Lenovo Legion Go          ║${NC}\n"
+  printf "${BLUE}║   SteamOS BC-250 Restore - AMD BC-250 / Cyan Skillfish ║${NC}\n"
   printf "${BLUE}║   https://github.com/mrsasy89/steamos-bc250-restore  ║${NC}\n"
   printf "${BLUE}╚══════════════════════════════════════════════════════╝${NC}\n"
   echo ""
 
   ensure_tools
 
-  # --- Fix ACPI (P-States/C-States) ---
+  # --- Fix ACPI (P-States/C-States via mkinitcpio hook) ---
   install_acpi_fix
 
   # --- bc250_smu_oc ---
