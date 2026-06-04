@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU** (Legion Go Gen 1 and compatible devices).
+Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU**.
 
 After every SteamOS update, services like `bc250-smu-oc` and `cyan-skillfish-governor-smu` may be removed or stop working. This repo contains the restore scripts, all tested configuration profiles, and the complete documentation of the optimization stack.
 
