@@ -8,15 +8,17 @@ updated to version 3.9
 
 **Current System:**
 
-Name: SteamOS Holo 
+`Name: SteamOS Holo`
 
-Version: 3.9 
+`Version: 3.9`
 
-Build: 20260601.100
+`Build: 20260601.100`
 
-Kernel: 6.18.33-valve1-1-nepture-618-gef57b8746c79
+`Kernel: 6.18.33-valve1-1-nepture-618-gef57b8746c79`
 
-Bios P3.00
+`Bios P3.00`
+
+---
 
 Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU**.
 
