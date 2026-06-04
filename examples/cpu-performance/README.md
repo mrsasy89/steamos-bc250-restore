@@ -1,6 +1,6 @@
 # CPU Aggressive Performance Mode
 
-Systemd service for **maximum permanent performance** on the Legion Go (AMD BC-250 / Cyan Skillfish APU).
+Systemd service for **maximum permanent performance** on the AMD BC-250 (Cyan Skillfish APU).
 
 > ⚠️ **Service runs as root** — always use `sudo systemctl`.
 
@@ -20,11 +20,39 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 # → performance ✅
 ```
 
+## amdgpu lockup_timeout (GPU ring crash fix)
+
+On SteamOS / kernel Neptune, `lockup_timeout` is **read-only at runtime** —
+the sysfs file `/sys/module/amdgpu/parameters/lockup_timeout` returns
+`Permission denied` even with sudo.
+
+The only way to change it is via **kernel module parameter at boot**:
+
+```bash
+# Step 1: create modprobe config
+echo "options amdgpu lockup_timeout=2000" | sudo tee /etc/modprobe.d/amdgpu-bc250.conf
+
+# Step 2: rebuild initramfs (requires writable /boot)
+sudo steamos-readonly disable
+sudo mkinitcpio -p linux-neptune-618
+sudo steamos-readonly enable
+
+# Step 3: reboot
+sudo reboot
+
+# Step 4: verify after reboot
+cat /sys/module/amdgpu/parameters/lockup_timeout
+# → 2000 ✅ (was 5000 on stock SteamOS Neptune)
+```
+
+> ⚠️ Always run `sudo steamos-readonly enable` after rebuilding initramfs.
+> The filesystem must be read-only for SteamOS updates to work correctly.
+
 ## What it does
 
 | Optimization | Detail | Effect |
 |---|---|---|
-| `scaling_governor=performance` | All 12 cores fixed at max | Predictable latency |
+| `scaling_governor=performance` | All cores fixed at max | Predictable latency |
 | `scaling_min_freq = max_freq` | No downscaling | Stable FPS |
 | AMD Core Performance Boost | Keeps boost active | Max single-thread burst |
 | C2/C3 disabled | Confirmed states on BC-250 (350-400µs latency) | No wakeup penalty |
@@ -36,12 +64,14 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 | `vm.swappiness=10` | Prefers RAM over swap | Less I/O latency |
 | `vm.compaction_proactiveness=0` | Disables proactive compaction | Eliminates stutter |
 | `kernel.nmi_watchdog=0` | Disables NMI watchdog | Fewer spurious interrupts |
+| `lockup_timeout=2000` | Via modprobe.d (see above) | Faster GPU ring recovery |
 
 ## Notes
 
 - C-states disabled: **C2** (index 2, 350µs) and **C3** (index 3, 400µs) — confirmed on BC-250 via `cpupower idle-info`
 - Only sysctl parameters **confirmed present** on kernel Neptune/SteamOS are used
 - Service auto-restores defaults on stop: `sudo systemctl stop cpu-performance.service`
+- `lockup_timeout` is **not** managed by this service — it requires modprobe.d + initramfs rebuild (see above)
 
 ## Quick restore
 
