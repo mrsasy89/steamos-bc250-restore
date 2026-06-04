@@ -1,0 +1,45 @@
+[Unit]
+Description=CPU Aggressive Performance Mode (BC250 / Legion Go)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# 1. Governor: performance su tutti i core
+ExecStart=/bin/bash -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > $f; done'
+
+# 2. Boost AMD: abilita CPB (Core Performance Boost)
+ExecStart=/bin/bash -c 'echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null; echo 0 > /sys/devices/system/cpu/cpu0/cpufreq/boost 2>/dev/null || true'
+
+# 3. Forza frequenza minima = massima (no scaling)
+ExecStart=/bin/bash -c '\
+  MAX=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq); \
+  for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do echo $MAX > $f; done'
+
+# 4. Scheduler: latenza minima (1ms, default 6ms)
+ExecStart=/bin/bash -c 'echo 1000000 > /proc/sys/kernel/sched_latency_ns 2>/dev/null || true'
+
+# 5. IRQ affinity: sposta gli interrupt di sistema sul core 0, lascia 1-11 liberi per il gioco
+ExecStart=/bin/bash -c '\
+  for irq in $(ls /proc/irq/); do \
+    [ -f /proc/irq/$irq/smp_affinity_list ] && echo 0 > /proc/irq/$irq/smp_affinity_list 2>/dev/null || true; \
+  done'
+
+# 6. Transparent HugePages: always (riduce TLB miss nelle sessioni lunghe)
+ExecStart=/bin/bash -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'
+
+# 7. vm.swappiness bassa: privilegia RAM su swap
+ExecStart=/bin/bash -c 'sysctl -w vm.swappiness=10'
+
+# 8. Disabilita watchdog per ridurre interrupt NMI
+ExecStart=/bin/bash -c 'sysctl -w kernel.nmi_watchdog=0'
+
+# Ripristino all'arresto del servizio
+ExecStop=/bin/bash -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $f; done'
+ExecStop=/bin/bash -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled'
+ExecStop=/bin/bash -c 'sysctl -w vm.swappiness=60'
+ExecStop=/bin/bash -c 'sysctl -w kernel.nmi_watchdog=1'
+
+[Install]
+WantedBy=multi-user.target
