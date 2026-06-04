@@ -4,7 +4,7 @@
 
 Post-update restoration and **full performance optimization** stack for **SteamOS** on **AMD BC-250 / Cyan Skillfish APU**.
 
-After every SteamOS update, services like `bc250-smu-oc` and `cyan-skillfish-governor-smu` may be removed or stop working. This repo contains the restore scripts, all tested configuration profiles, and the complete documentation of the optimization stack.
+After every SteamOS update, services like `bc250-acpi-fix`, `bc250-smu-oc` and `cyan-skillfish-governor-smu` may be removed or stop working. This repo contains the restore scripts, all tested configuration profiles, and the complete documentation of the optimization stack.
 
 > ⚠️ **Hardware warning:** The BC-250 is a custom AMD SoC. Incorrect overclock or voltage settings can **permanently brick the hardware**. Always follow the step-by-step guide and never exceed the documented voltage limits.
 
