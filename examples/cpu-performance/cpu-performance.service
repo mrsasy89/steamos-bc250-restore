@@ -1,0 +1,51 @@
+[Unit]
+Description=CPU Aggressive Performance Mode - AMD BC-250 / Legion Go
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# 1. Governor performance su tutti i core
+ExecStart=/bin/bash -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > $f; done'
+
+# 2. Blocca scaling_min_freq = max_freq (frequenza fissa, nessuno scaling)
+ExecStart=/bin/bash -c '\
+  MAX=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq); \
+  for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do echo $MAX > $f; done'
+
+# 3. AMD Core Performance Boost
+ExecStart=/bin/bash -c 'echo 1 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true'
+
+# 4. Disabilita C2 e C3 (latenza 350-400us) — confermato su BC-250: POLL C1 C2 C3
+ExecStart=/bin/bash -c 'cpupower -c all idle-set -d 2 2>/dev/null || true'
+ExecStart=/bin/bash -c 'cpupower -c all idle-set -d 3 2>/dev/null || true'
+
+# 5. Scheduler (parametri confermati su kernel Neptune/SteamOS)
+ExecStart=/bin/bash -c 'sysctl -w kernel.sched_autogroup_enabled=0'
+ExecStart=/bin/bash -c 'sysctl -w kernel.sched_rt_runtime_us=980000'
+ExecStart=/bin/bash -c 'sysctl -w kernel.sched_util_clamp_min=1024'
+ExecStart=/bin/bash -c 'sysctl -w kernel.sched_util_clamp_min_rt_default=1024'
+
+# 6. IRQ pinning: interrupt su core 0, core 1-11 liberi per il gioco
+ExecStart=/bin/bash -c '\
+  for irq in $(ls /proc/irq/); do \
+    [ -f /proc/irq/$irq/smp_affinity_list ] && \
+    echo 0 > /proc/irq/$irq/smp_affinity_list 2>/dev/null || true; \
+  done'
+
+# 7. Memoria
+ExecStart=/bin/bash -c 'sysctl -w vm.swappiness=10'
+ExecStart=/bin/bash -c 'sysctl -w vm.dirty_ratio=5'
+ExecStart=/bin/bash -c 'sysctl -w vm.dirty_background_ratio=2'
+ExecStart=/bin/bash -c 'sysctl -w vm.compaction_proactiveness=0'
+ExecStart=/bin/bash -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'
+ExecStart=/bin/bash -c 'sysctl -w kernel.nmi_watchdog=0'
+
+# Ripristino automatico allo stop
+ExecStop=/bin/bash -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $f; done'
+ExecStop=/bin/bash -c 'sysctl -w vm.swappiness=60 kernel.nmi_watchdog=1 kernel.sched_autogroup_enabled=1'
+ExecStop=/bin/bash -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled'
+
+[Install]
+WantedBy=multi-user.target
