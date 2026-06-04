@@ -7,6 +7,7 @@ https://steamdeck-images.steamos.cloud/steamdeck/20251027.1000/?C=M&O=D
 updated to version 3.9
 
 **Current System:**
+
 Name: SteamOS Holo 
 
 Version: 3.9 
