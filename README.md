@@ -220,6 +220,44 @@ Default VDDC: 799 mV @ 1000 MHz
 
 ---
 
+## amdgpu.lockup_timeout Fix (04 giu 2026)
+
+### Problema
+
+Il parametro `amdgpu.lockup_timeout` è hardcoded nella kernel cmdline di GRUB e **non** può essere sovrascritto tramite `/etc/modprobe.d/`. Il file `modprobe.d` viene ignorato perché il parametro cmdline ha la precedenza assoluta.
+
+### Struttura bootloader su questa macchina
+
+Il boot avviene tramite `Boot0007 → /EFI/BOOT/BOOTX64.EFI` (UEFI OS), che carica `grubx64.efi`, il quale legge `grub.cfg`. Il file `custom.cfg` viene caricato da GRUB ma **la voce di boot usata corrisponde a `grub.cfg`**, non a `custom.cfg`.
+
+> ⚠️ `grub.cfg` viene rigenerato ad ogni aggiornamento SteamOS. Dopo ogni update, ripetere il fix sotto.
+
+### Fix
+
+```bash
+# Modifica grub.cfg (tutti i punti con lockup_timeout)
+sudo sed -i 's/amdgpu.lockup_timeout=5000,10000,10000,5000/amdgpu.lockup_timeout=2000,2000,2000,2000/g' \
+  /boot/efi/EFI/steamos/grub.cfg
+
+# Verifica
+sudo grep -n "lockup" /boot/efi/EFI/steamos/grub.cfg
+# → amdgpu.lockup_timeout=2000,2000,2000,2000 ✅
+
+sudo reboot
+
+# Dopo reboot
+cat /proc/cmdline | grep lockup
+# → amdgpu.lockup_timeout=2000,2000,2000,2000 ✅
+```
+
+I 4 valori corrispondono ai ring: **GFX, Compute, SDMA, MES**.
+
+### Nota su custom.cfg
+
+`custom.cfg` è il file corretto per modifiche persistenti agli update, ma su questa configurazione il boot usa direttamente `grub.cfg`. Il `post-update-check.sh` dovrebbe verificare anche questo parametro dopo ogni update.
+
+---
+
 ## Post-Update Restore
 
 After every SteamOS update:
@@ -244,6 +282,7 @@ chmod +x restore-bc250-steamos.sh post-update-check.sh
 
 - [ ] **40 CU unlock** — currently 36 CU active (4 disabled at firmware level)
 - [ ] Further SMU OC exploration after 40 CU baseline
+- [ ] Add `lockup_timeout` fix to `post-update-check.sh` and `restore-bc250-steamos.sh`
 
 ---
 
@@ -253,6 +292,7 @@ chmod +x restore-bc250-steamos.sh post-update-check.sh
 - D-Bus policy file goes in `/usr/share/dbus-1/system.d/` (verified on SteamOS).
 - ACPI tables in `/etc/initcpio/acpi_override/` are preserved across updates.
 - SteamOS uses `steamcl.efi` as bootloader — GRUB-based ACPI injection does **not** work.
+- `modprobe.d` parameters are ignored if the same parameter is already set in kernel cmdline (cmdline wins).
 
 ---
 
