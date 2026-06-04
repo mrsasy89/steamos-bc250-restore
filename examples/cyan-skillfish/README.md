@@ -13,11 +13,12 @@ the GPU governor via SMU for the BC-250 (Cyan Skillfish APU).
 > sudo systemctl status cyan-skillfish-governor-smu
 > ```
 
-## Available files
+## Available profiles
 
-| File | Description |
+| File | When to use |
 |---|---|
-| `config.toml.aggressive` | Aggressive profile v2 — fast ramp, delayed downclock, min 1800MHz floor |
+| `config.toml.aggressive` | Default — daily use, min 1800 MHz floor |
+| `config.toml.gaming` | RE Engine / Vulkan-heavy games — GPU fixed at 2000 MHz, no ramping |
 
 ## Installation
 
@@ -25,34 +26,48 @@ the GPU governor via SMU for the BC-250 (Cyan Skillfish APU).
 # Find the active config path
 sudo systemctl cat cyan-skillfish-governor-smu | grep -i config
 
-# Copy the aggressive profile
-sudo cp config.toml.aggressive /etc/cyan-skillfish-governor/config.toml
-# or wherever the service expects it
+# Apply aggressive profile (default)
+sudo cp config.toml.aggressive /etc/cyan-skillfish-governor-smu/config.toml
 
-# Restart the governor
+# Apply gaming profile (RE Engine, Vulkan heavy)
+sudo cp config.toml.gaming /etc/cyan-skillfish-governor-smu/config.toml
+
 sudo systemctl restart cyan-skillfish-governor-smu
-sudo systemctl status cyan-skillfish-governor-smu
 ```
 
-## Changes from default (v2)
+## Profile comparison
 
-| Parameter | Default | Aggressive v2 | Effect |
-|---|---|---|---|
-| `burst` ramp rate | 15 | **25** | Reaches peak frequency faster |
-| `normal` ramp rate | 2 | **4** | More reactive upscaling |
-| `burst-samples` | 10 | **5** | Detects burst load in half the time |
-| `down-events` | 20 | **60** | Resists downclocking much longer |
-| `upper` load target | 0.90 | **0.75** | Scales up earlier |
-| `lower` load target | 0.75 | **0.55** | Tolerates lower load before downclocking |
-| `min` frequency | 1000 MHz | **1800 MHz** | Never drops below 1800MHz — eliminates FPS dips |
+| Parameter | aggressive v2 | gaming |
+|---|---|---|
+| `min` frequency | 1800 MHz | **2000 MHz** — fixed, no ramping |
+| `max` frequency | 2000 MHz | 2000 MHz |
+| `down-events` | 60 | **999** — never downclocks |
+| `burst` ramp | 25 | 25 |
+| `upper` load target | 0.75 | 0.75 |
+| `lower` load target | 0.55 | 0.55 |
+| Use case | General gaming | RE Engine, Vulkan-heavy titles |
+
+## GPU ring timeout fix
+
+RE Engine and other Vulkan-aggressive titles can trigger a GPU ring timeout (`gfx_0.0.0 timeout`)
+causing a green screen + gamescope restart. Two mitigations are applied:
+
+1. **`config.toml.gaming`** — GPU fixed at 2000 MHz eliminates frequency transitions during burst draw calls
+2. **`lockup_timeout = 2000ms`** — set in `cpu-performance.service`, reduces recovery time from 10s to 2s
+
+```bash
+# Verify lockup_timeout is active
+cat /sys/module/amdgpu/parameters/lockup_timeout
+# → 2000 ✅
+```
 
 ## Full BC-250 optimization stack
 
 | # | Component | Status | Notes |
 |---|---|---|---|
 | 1 | `bc250-acpi-fix` | ✅ Applied | ACPI table fix |
-| 2 | `cpu-performance.service` | ✅ Active | governor + C-states + scheduler |
-| 3 | `cyan-skillfish-governor-smu` | ✅ Active | GPU via SMU, this config |
+| 2 | `cpu-performance.service` | ✅ Active | governor + C-states + scheduler + lockup_timeout |
+| 3 | `cyan-skillfish-governor-smu` | ✅ Active | GPU via SMU |
 | 4 | `bc250-smu-oc` | ✅ Active | CPU OC: 4000MHz @ 1256mV (scale -27) |
 | 5 | 40 CU unlock | ⏳ Next step | — |
 

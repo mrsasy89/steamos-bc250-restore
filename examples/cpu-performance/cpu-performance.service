@@ -1,5 +1,5 @@
 [Unit]
-Description=CPU Aggressive Performance Mode - AMD BC-250 / Legion Go
+Description=CPU Aggressive Performance Mode - AMD BC-250
 After=multi-user.target
 
 [Service]
@@ -42,10 +42,15 @@ ExecStart=/bin/bash -c 'sysctl -w vm.compaction_proactiveness=0'
 ExecStart=/bin/bash -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'
 ExecStart=/bin/bash -c 'sysctl -w kernel.nmi_watchdog=0'
 
+# 8. GPU ring lockup timeout — ridotto a 2s per recovery rapido (default 10s)
+# Previene schermo verde su titoli RE Engine / Vulkan aggressivo
+ExecStart=/bin/bash -c 'echo 2000 > /sys/module/amdgpu/parameters/lockup_timeout 2>/dev/null || true'
+
 # Ripristino automatico allo stop
 ExecStop=/bin/bash -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $f; done'
 ExecStop=/bin/bash -c 'sysctl -w vm.swappiness=60 kernel.nmi_watchdog=1 kernel.sched_autogroup_enabled=1'
 ExecStop=/bin/bash -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled'
+ExecStop=/bin/bash -c 'echo 10000 > /sys/module/amdgpu/parameters/lockup_timeout 2>/dev/null || true'
 
 [Install]
 WantedBy=multi-user.target
