@@ -8,7 +8,7 @@
 #   2. Rimozione cpu-performance.service (incompatibile con P-States ACPI)
 #   3. CPU governor schedutil persistente via systemd
 #   4. Installazione bc250_smu_oc via Python venv (pip non disponibile su SteamOS)
-#   5. Installazione cyan-skillfish-governor-smu (ramo smu)
+#   5. Installazione cyan-skillfish-governor-smu (binario precompilato v0.4.6)
 #   6. Policy D-Bus per com.cyan.SkillFishGovernor
 #
 # LEZIONI APPRESE (critiche):
@@ -18,14 +18,19 @@
 #   - modprobe.d è ignorato — parametri amdgpu solo in grub.cfg
 #   - steamos-readonly disable prima di qualsiasi modifica
 #   - Crash hard corrompono il prefix Proton — cancellare shadercache e compatdata prima di ritestare
-#   - Governor corretto: schedutil — SteamOS lo gestisce nativamente con P-States
+#   - Governor corretto: schedutil — SteamOS lo gestisce nativamente con P-Stati
 #   - pip non è disponibile su SteamOS Python 3.13 — usare python -m venv
 #   - pacman-key --populate holo necessario per firme Valve/SteamOS
 #   - bc250-apply non è nel PATH del venv — usare path completo o alias
 #   - scaling_available_frequencies mostra solo P-States ACPI, non l'OC SMU
+#   - sudo systemctl restart dbus su SteamOS congela il sistema — usare reboot
+#   - install.sh di cyan-skillfish-governor NON include scripts/ nel tar v0.4.6
+#     → installazione manuale necessaria, policy D-Bus va creata a mano
+#   - D-Bus policy va in /etc/dbus-1/system.d/ (non /usr/share/dbus-1/system.d/)
 #
 # Hardware supportato: AMD BC-250 / Cyan Skillfish (PCI_ID: 1002:13FE)
 # Testato su: SteamOS 3.9 Holo — Kernel 6.18.x-neptune-618
+# Governor SMU validato con: CP2077, Resident Evil 4 Remake — stabile, nessun crash
 #
 # https://github.com/mrsasy89/steamos-bc250-restore
 # ============================================================
@@ -34,15 +39,19 @@ set -euo pipefail
 
 # --- Configurazione ---
 BC250_REPO="https://github.com/bc250-collective/bc250_smu_oc.git"
+# cyan-skillfish-governor-smu: preferire il binario precompilato dal tag v0.4.6
+# Il ramo smu richiede cargo (build lenta ~15min su BC-250)
+CSG_RELEASE_URL="https://github.com/filippor/cyan-skillfish-governor/releases/download/v0.4.6/cyan-skillfish-governor-smu-v0.4.6-x86_64-linux.tar.gz"
 CSG_REPO="https://github.com/filippor/cyan-skillfish-governor.git"
 CSG_BRANCH="smu"
 WORKDIR="${HOME}/fix"
 VENV_DIR="${HOME}/.venv/bc250"
 
-DBUS_POLICY_DIR="/usr/share/dbus-1/system.d"
+DBUS_POLICY_DIR="/etc/dbus-1/system.d"
 DBUS_POLICY_FILE="${DBUS_POLICY_DIR}/com.cyan.SkillFishGovernor.conf"
-CSG_BIN="/usr/local/bin/cyan-skillfish-governor-smu"
-CSG_CONFIG_DIR="/etc/cyan-skillfish-governor-smu"
+CSG_INSTALL_DIR="/etc/cyan-skillfish-governor-smu"
+CSG_BIN="${CSG_INSTALL_DIR}/cyan-skillfish-governor-smu"
+CSG_CONFIG="${CSG_INSTALL_DIR}/config.toml"
 CSG_SERVICE="/etc/systemd/system/cyan-skillfish-governor-smu.service"
 CPU_PERF_SERVICE="/etc/systemd/system/cpu-performance.service"
 CPU_GOV_SERVICE="/etc/systemd/system/cpu-governor.service"
@@ -82,7 +91,6 @@ ensure_tools() {
   log "Verifica prerequisiti"
 
   # Inizializza keyring SteamOS (holo) — necessario per pacman su SteamOS
-  # Le chiavi Arch standard non coprono i pacchetti firmati da Valve
   if ! pacman-key --list-keys 2>/dev/null | grep -q "steamos.cloud"; then
     log "Inizializzazione keyring SteamOS (holo)"
     sudo pacman-key --init
@@ -92,7 +100,7 @@ ensure_tools() {
     ok "Keyring holo già presente"
   fi
 
-  for cmd in git python3 cargo cpio; do
+  for cmd in git python3 curl tar; do
     if command -v "$cmd" >/dev/null 2>&1; then
       ok "$cmd trovato: $(command -v $cmd)"
     else
@@ -125,35 +133,35 @@ setup_venv() {
 }
 
 # --- Policy D-Bus ---
+# NOTA: NON eseguire 'sudo systemctl restart dbus' su SteamOS — congela il sistema.
+# La policy viene caricata al prossimo riavvio.
 apply_dbus_policy() {
   log "Applico policy D-Bus per com.cyan.SkillFishGovernor"
   sudo mkdir -p "$DBUS_POLICY_DIR"
   sudo tee "$DBUS_POLICY_FILE" >/dev/null <<'DBUSEOF'
-<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<!DOCTYPE busconfig PUBLIC
+  "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
-  <policy user="deck">
+  <policy user="root">
     <allow own="com.cyan.SkillFishGovernor"/>
     <allow send_destination="com.cyan.SkillFishGovernor"/>
+    <allow receive_sender="com.cyan.SkillFishGovernor"/>
   </policy>
+
   <policy context="default">
-    <allow own="com.cyan.SkillFishGovernor"/>
     <allow send_destination="com.cyan.SkillFishGovernor"/>
+    <allow send_interface="com.cyan.SkillFishGovernor.PerformanceMode"/>
+    <allow send_interface="org.freedesktop.DBus.Properties"/>
   </policy>
 </busconfig>
 DBUSEOF
   ok "Policy D-Bus scritta in ${DBUS_POLICY_FILE}"
+  warn "La policy D-Bus verrà caricata al prossimo riavvio (NON eseguire systemctl restart dbus)"
 }
 
 # ---------------------------------------------------------------------------
 # Fix ACPI override (P-States / C-States BC-250)
-#
-# METODO CORRETTO: hook nativo acpi_override di mkinitcpio nel drop-in
-# /etc/mkinitcpio.conf.d/20-steamdeck.conf
-#
-# NON modificare:
-#   - mkinitcpio.conf principale (viene sovrascritto dagli update)
-#   - grub.cfg per ACPI (il path /boot/ è relativo alla btrfs, non alla EFI)
 # ---------------------------------------------------------------------------
 install_acpi_fix() {
   log "Fix ACPI override per P-States/C-States BC-250 (via mkinitcpio hook)"
@@ -179,7 +187,7 @@ install_acpi_fix() {
     else
       log "Aggiungo hook acpi_override al drop-in ${MKINITCPIO_DROPIN}"
       sudo sed -i 's/^HOOKS=(/HOOKS=(acpi_override /' "$MKINITCPIO_DROPIN"
-      ok "Drop-in aggiornato: $(cat $MKINITCPIO_DROPIN)"
+      ok "Drop-in aggiornato"
     fi
   else
     warn "${MKINITCPIO_DROPIN} non trovato — aggiorno il preset direttamente"
@@ -196,24 +204,15 @@ install_acpi_fix() {
 
   sudo steamos-readonly enable
 
-  ok "Fix ACPI completato — tabelle caricate nel early uncompressed CPIO"
-
-  echo ""
-  printf "${YELLOW}Verifica post-riavvio:${NC}\n"
-  printf "${YELLOW}  sudo dmesg | grep -i 'Table Upgrade'${NC}\n"
-  printf "${YELLOW}  Atteso: install [SSDT- HACK- P_CST3] e install [SSDT- HACK- PSTATES]${NC}\n"
+  ok "Fix ACPI completato — riavvio necessario per attivare le tabelle"
 }
 
 # ---------------------------------------------------------------------------
 # Rimozione cpu-performance.service
-#
-# CRITICO: cpu-performance.service imposta P-States manualmente via cpupower
-# o simili, causando conflitti con le tabelle ACPI P-States caricate via
-# acpi_override. Il risultato sono artefatti GPU e cali FPS in gaming.
-# Con SSDT-PST attivo, schedutil gestisce la frequenza correttamente da solo.
+# CRITICO: incompatibile con P-States ACPI → artefatti GPU e cali FPS
 # ---------------------------------------------------------------------------
 remove_cpu_performance_service() {
-  log "Verifica e rimozione cpu-performance.service (incompatibile con P-States ACPI)"
+  log "Verifica e rimozione cpu-performance.service"
 
   if have_unit "cpu-performance.service" || [[ -f "$CPU_PERF_SERVICE" ]]; then
     warn "cpu-performance.service trovato — rimozione in corso"
@@ -223,26 +222,18 @@ remove_cpu_performance_service() {
     sudo systemctl daemon-reload
     ok "cpu-performance.service rimosso"
   else
-    ok "cpu-performance.service non presente — nessuna azione necessaria"
+    ok "cpu-performance.service non presente"
   fi
 }
 
 # ---------------------------------------------------------------------------
 # CPU governor schedutil persistente
-#
-# schedutil è il governor corretto con P-States ACPI attivi:
-# scala la frequenza in base al carico dello scheduler, ottimale per gaming.
-# SteamOS lo gestisce nativamente — non serve cpupower o altri tool.
-#
-# NOTA: scaling_available_frequencies mostra solo i P-States ACPI (max 3200 MHz).
-# L'OC via SMU agisce a livello hardware e bypassa questo limite — è normale.
-# Per verificare l'OC reale usare /proc/cpuinfo o il monitor in-game.
 # ---------------------------------------------------------------------------
 install_cpu_governor() {
   log "Configurazione CPU governor schedutil persistente"
 
   if have_unit "cpu-governor.service" && grep -q "schedutil" "$CPU_GOV_SERVICE" 2>/dev/null; then
-    ok "cpu-governor.service già presente e configurato con schedutil"
+    ok "cpu-governor.service già configurato con schedutil"
     return 0
   fi
 
@@ -275,22 +266,12 @@ GOVEOF
   if $all_ok; then
     local core_count
     core_count=$(ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | wc -l)
-    ok "schedutil attivo su tutti i ${core_count} core — servizio abilitato al boot"
+    ok "schedutil attivo su tutti i ${core_count} core"
   fi
 }
 
 # ---------------------------------------------------------------------------
 # Installazione bc250_smu_oc
-#
-# NOTA IMPORTANTE su pip in SteamOS:
-# SteamOS usa Python 3.13 con PEP 668 — l'ambiente è "externally managed".
-# - pip --break-system-packages: BLOCCATO da PEP 668
-# - ensurepip --upgrade: BLOCCATO da PEP 668
-# - pacman -S python-pipx: richiede keyring holo + non sopravvive agli update
-#
-# SOLUZIONE CORRETTA: python -m venv ~/.venv/bc250
-# Il venv vive nella home — sopravvive agli update SteamOS.
-# bc250-apply non è nel PATH di sistema — usare il path completo del venv.
 # ---------------------------------------------------------------------------
 install_bc250() {
   log "Installazione/Aggiornamento bc250_smu_oc"
@@ -310,13 +291,8 @@ install_bc250() {
   "${VENV_DIR}/bin/pip" install "$WORKDIR/bc250_smu_oc/"
 
   ok "bc250_smu_oc installato nel venv ${VENV_DIR}"
-
-  # Verifica import
   "${VENV_DIR}/bin/python3" -c "import bc250_smu; print('bc250_smu import OK')"
 
-  # Applica profilo OC e installa il servizio systemd
-  # bc250_apply.py --install genera automaticamente il service file
-  # usando il path corretto del venv Python (non un path hardcodato)
   if [[ -f "$BC250_CONF" ]]; then
     log "Configurazione OC trovata in ${BC250_CONF} — applico profilo"
     sudo "${VENV_DIR}/bin/python3" "$WORKDIR/bc250_smu_oc/bc250_apply.py" \
@@ -334,70 +310,96 @@ install_bc250() {
     printf "${YELLOW}    -f ${OC_FREQ} -v ${OC_VID} -t ${OC_TEMP} -k -c ${BC250_CONF}${NC}\n"
     printf "${YELLOW}${NC}\n"
     printf "${YELLOW}  Profilo di riferimento: ${OC_FREQ} MHz @ ${OC_VID} mV, ${OC_TEMP}°C${NC}\n"
-    printf "${YELLOW}  ATTENZIONE: ogni chip è diverso — il detect verifica il tuo specifico hardware${NC}\n"
-    printf "${YELLOW}  NON eccedere 1300 mV per evitare danni alla CPU${NC}\n"
+    printf "${YELLOW}  ATTENZIONE: ogni chip è diverso — NON eccedere 1300 mV${NC}\n"
     printf "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     echo ""
   fi
 }
 
-# --- Installazione cyan-skillfish-governor-smu ---
+# ---------------------------------------------------------------------------
+# Installazione cyan-skillfish-governor-smu (binario precompilato)
+#
+# METODO PREFERITO: binario precompilato v0.4.6 da GitHub Releases
+# Il tar v0.4.6 NON include scripts/ → install.sh fallisce su cp scripts/...
+# Installazione manuale necessaria (come documentato in questo script)
+#
+# ALTERNATIVA: compilare dal sorgente (ramo smu) con cargo
+#   → lento su BC-250 (~15min), richiede cargo installato
+#
+# NOTA D-Bus: NON eseguire 'systemctl restart dbus' — congela SteamOS
+#   La policy viene caricata automaticamente al riavvio
+# ---------------------------------------------------------------------------
 install_csg() {
-  log "Installazione/Aggiornamento cyan-skillfish-governor-smu (ramo: ${CSG_BRANCH})"
+  log "Installazione cyan-skillfish-governor-smu v0.4.6 (binario precompilato)"
   mkdir -p "$WORKDIR"
 
-  if [[ -d "$WORKDIR/cyan-skillfish-governor/.git" ]]; then
-    log "Aggiorno repo esistente cyan-skillfish-governor"
-    git -C "$WORKDIR/cyan-skillfish-governor" fetch origin
-    git -C "$WORKDIR/cyan-skillfish-governor" checkout "$CSG_BRANCH"
-    git -C "$WORKDIR/cyan-skillfish-governor" pull --ff-only origin "$CSG_BRANCH"
+  local TAR_NAME="cyan-skillfish-governor-smu-v0.4.6-x86_64-linux"
+  local TAR_PATH="${WORKDIR}/${TAR_NAME}.tar.gz"
+  local EXTRACT_DIR="${WORKDIR}/${TAR_NAME}"
+
+  # Scarica se non già presente
+  if [[ ! -f "$TAR_PATH" ]]; then
+    log "Download binario precompilato v0.4.6"
+    curl -L -o "$TAR_PATH" "$CSG_RELEASE_URL"
   else
-    log "Clono cyan-skillfish-governor (ramo ${CSG_BRANCH})"
-    git clone --branch "$CSG_BRANCH" "$CSG_REPO" "$WORKDIR/cyan-skillfish-governor"
+    ok "Archivio già presente: ${TAR_PATH}"
   fi
 
-  cd "$WORKDIR/cyan-skillfish-governor"
+  # Estrai
+  if [[ ! -d "$EXTRACT_DIR" ]]; then
+    log "Estrazione archivio"
+    tar -xzf "$TAR_PATH" -C "$WORKDIR"
+  else
+    ok "Directory già estratta: ${EXTRACT_DIR}"
+  fi
 
-  log "Compilazione con cargo"
-  cargo build --release --bin cyan-skillfish-governor-smu
+  # Installazione manuale (install.sh fallisce su scripts/ mancante)
+  log "Installazione binario in ${CSG_INSTALL_DIR}"
+  sudo mkdir -p "$CSG_INSTALL_DIR"
+  sudo cp "${EXTRACT_DIR}/cyan-skillfish-governor-smu" "$CSG_BIN"
+  sudo chmod +x "$CSG_BIN"
 
-  log "Installo binario in ${CSG_BIN}"
-  sudo install -Dm755 target/release/cyan-skillfish-governor-smu "$CSG_BIN"
+  # Config: non sovrascrivere se già presente (configurazione utente)
+  if [[ ! -f "$CSG_CONFIG" ]]; then
+    log "Copio config.toml di default"
+    sudo cp "${EXTRACT_DIR}/config.toml" "$CSG_CONFIG"
+    ok "config.toml installato in ${CSG_CONFIG}"
+    warn "Edita ${CSG_CONFIG} con il profilo validato (vedi config.toml nel repo)"
+  else
+    ok "config.toml già presente — mantengo configurazione utente"
+  fi
 
-  log "Creo file .service systemd"
+  # Policy D-Bus
+  apply_dbus_policy
+
+  # Service file
+  log "Creo service file systemd"
   sudo tee "$CSG_SERVICE" >/dev/null <<SERVICEEOF
 [Unit]
-Description=Cyan Skillfish Governor SMU
-After=network.target
-Wants=network.target
+Description=Cyan Skillfish GPU Governor
+After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=${CSG_BIN}
+ExecStart=${CSG_BIN} ${CSG_CONFIG}
 Restart=on-failure
-RestartSec=3
-User=root
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 SERVICEEOF
 
-  sudo mkdir -p "$CSG_CONFIG_DIR"
-
-  apply_dbus_policy
-
   sudo systemctl daemon-reload
-  sudo systemctl enable cyan-skillfish-governor-smu.service
-  sudo systemctl restart cyan-skillfish-governor-smu.service
+  sudo systemctl enable --now cyan-skillfish-governor-smu.service
 
-  ok "cyan-skillfish-governor-smu installato, policy D-Bus applicata, servizio avviato"
+  ok "cyan-skillfish-governor-smu installato e avviato"
   echo ""
   printf "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-  printf "${YELLOW}  Importa il tuo config.toml stabile:${NC}\n"
-  printf "${YELLOW}  Profilo stabile: min=1800, max=2000, down-events=60,${NC}\n"
-  printf "${YELLOW}                   burst=25, upper=0.75, lower=0.55${NC}\n"
-  printf "${YELLOW}  sudo cp examples/config.toml.example ${CSG_CONFIG_DIR}/config.toml${NC}\n"
-  printf "${YELLOW}  sudo systemctl restart cyan-skillfish-governor-smu.service${NC}\n"
+  printf "${YELLOW}  Config attivo: ${CSG_CONFIG}${NC}\n"
+  printf "${YELLOW}  Profilo validato: min=1000, max=2000 MHz${NC}\n"
+  printf "${YELLOW}  Safe-points: 1000/800mV → 1175/850 → 1500/900 → 1700/920 → 1850/930 → 2000/960mV${NC}\n"
   printf "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
   echo ""
 }
@@ -407,12 +409,12 @@ verify_services() {
   log "Verifica finale stato servizi"
   echo ""
 
-  printf "${BLUE}--- bc250-smu-oc.service ----------------------------------${NC}\n"
-  systemctl status bc250-smu-oc.service --no-pager -l 2>/dev/null || true
-
-  echo ""
   printf "${BLUE}--- cyan-skillfish-governor-smu.service -------------------${NC}\n"
   systemctl status cyan-skillfish-governor-smu.service --no-pager -l 2>/dev/null || true
+
+  echo ""
+  printf "${BLUE}--- bc250-smu-oc.service ----------------------------------${NC}\n"
+  systemctl status bc250-smu-oc.service --no-pager -l 2>/dev/null || true
 
   echo ""
   printf "${BLUE}--- cpu-governor.service ----------------------------------${NC}\n"
@@ -421,7 +423,7 @@ verify_services() {
   echo ""
   printf "${BLUE}--- Governor CPU attivo -----------------------------------${NC}\n"
   echo "Governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo 'N/A')"
-  echo "Freq corrente core0: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null | awk '{printf \"%.0f MHz\", $1/1000}' || echo 'N/A')"
+  echo "Freq corrente core0: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null | awk '{printf "%.0f MHz", $1/1000}' || echo 'N/A')"
   echo ""
   printf "${YELLOW}NOTA: scaling_available_frequencies mostra solo P-States ACPI (max 3200 MHz).${NC}\n"
   printf "${YELLOW}      L'OC SMU agisce a livello hardware — verificare la frequenza reale${NC}\n"
@@ -449,28 +451,20 @@ main() {
   printf "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}\n"
   echo ""
 
-  # 0. Prerequisiti e keyring
   ensure_tools
-
-  # 1. Fix ACPI P-States/C-States via mkinitcpio hook
   install_acpi_fix
-
-  # 2. Rimuovi cpu-performance.service (causa artefatti con P-States ACPI)
   remove_cpu_performance_service
-
-  # 3. CPU governor schedutil persistente
   install_cpu_governor
 
-  # 4. bc250_smu_oc (via Python venv — pip non disponibile su SteamOS)
+  # bc250_smu_oc (CPU OC)
   if have_unit "bc250-smu-oc.service"; then
     ok "bc250-smu-oc.service presente — riciclo configurazione"
-    # Riapplica il profilo OC (necessario dopo ogni update SteamOS)
     if [[ -f "$BC250_CONF" ]]; then
       setup_venv
       if [[ -d "$WORKDIR/bc250_smu_oc" ]]; then
         sudo "${VENV_DIR}/bin/python3" "$WORKDIR/bc250_smu_oc/bc250_apply.py" \
           --apply "$BC250_CONF" || warn "Impossibile riapplicare OC — riavvia il servizio manualmente"
-        ok "Profilo OC riapplicato"
+        ok "Profilo OC CPU riapplicato"
       fi
     fi
   else
@@ -478,13 +472,13 @@ main() {
     install_bc250
   fi
 
-  # 5. cyan-skillfish-governor-smu
+  # cyan-skillfish-governor-smu (GPU governor)
   if have_unit "cyan-skillfish-governor-smu.service"; then
     ok "cyan-skillfish-governor-smu.service presente"
-    log "Riciclo policy D-Bus (sicurezza post-update)"
+    log "Aggiorno policy D-Bus (sicurezza post-update)"
     apply_dbus_policy
     sudo systemctl restart cyan-skillfish-governor-smu.service
-    ok "Servizio riavviato con policy D-Bus aggiornata"
+    ok "Governor GPU riavviato"
   else
     warn "cyan-skillfish-governor-smu.service NON trovato: avvio installazione"
     install_csg
@@ -497,11 +491,11 @@ main() {
   printf "${GREEN}║   Ripristino completato!                                 ║${NC}\n"
   printf "${GREEN}║                                                          ║${NC}\n"
   printf "${GREEN}║   Se è il primo avvio o dopo update, riavvia per         ║${NC}\n"
-  printf "${GREEN}║   attivare le tabelle ACPI caricate nell'initramfs.      ║${NC}\n"
+  printf "${GREEN}║   attivare le tabelle ACPI e la policy D-Bus.            ║${NC}\n"
   printf "${GREEN}║                                                          ║${NC}\n"
   printf "${GREEN}║   Prossimi step:                                         ║${NC}\n"
-  printf "${GREEN}║   → Importa config.toml per cyan-skillfish-governor-smu  ║${NC}\n"
-  printf "${GREEN}║   → Testa stabilità con CP2077 o altro titolo AAA        ║${NC}\n"
+  printf "${GREEN}║   → Tuning governor per target 60fps stabili             ║${NC}\n"
+  printf "${GREEN}║   → Step futuro: sblocco 40 CU                          ║${NC}\n"
   printf "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}\n"
   echo ""
 }
