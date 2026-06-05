@@ -21,7 +21,7 @@ It allows less experienced users to enable and maintain fixes and overclocking o
 | 4 | `bc250_smu_oc` CPU OC via Python venv | ✅ Stable |
 | 5 | `cyan-skillfish-governor-smu` v0.4.6 GPU governor | ✅ Validated |
 | 6 | D-Bus policy `com.cyan.SkillFishGovernor` | ✅ Stable |
-| 7 | Governor tuning for stable 60fps | 🔄 In progress |
+| 7 | Governor tuning for stable 1080p/60fps | 🔄 In progress |
 | 8 | Unlock 40 CUs | 📋 Future |
 
 ---
@@ -164,7 +164,7 @@ The v0.4.6 tarball **does not include** `scripts/cyan-skillfish-performance-mode
 - [x] bc250_smu_oc CPU OC (4000 MHz @ 1275 mV)
 - [x] cyan-skillfish-governor-smu v0.4.6 installed and validated
 - [x] GPU governor 1000-2000 MHz official safe points
-- [ ] **Next**: Governor tuning for stable 60fps targets on AAA titles
+- [ ] **Next**: Governor tuning for stable 1080p/60fps targets on AAA titles
 - [ ] **Future**: Unlock 40 CUs (Compute Units disabled via binning)
 
 ---
