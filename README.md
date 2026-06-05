@@ -6,7 +6,7 @@ Permette a utenti meno esperti di attivare i fix e l'overclock su un BC-250 appe
 
 ---
 
-## Supported hardware # SteamOS BC-250 Restore
+## Supported hardware
 
 Post-update SteamOS restore script for **AMD BC-250 / Cyan Skillfish** (ASRock).
 
