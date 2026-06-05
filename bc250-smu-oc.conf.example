@@ -1,0 +1,27 @@
+# bc250-smu-oc.conf — Profilo CPU OC validato su Lenovo Legion Go Gen 1
+# Trovato con: bc250_detect.py -f 3800 -v 1275 -t 90 -k
+# Data validazione: 05 giu 2026
+#
+# PARAMETRI:
+#   frequency = frequenza CPU target in MHz
+#   scale     = offset voltaggio SMU (negativo = undervolt, trovato da bc250_detect.py)
+#               -12 = riduzione voltaggio ottimale per stabilità/efficienza
+#   max_temperature = limite termico in °C (il detect si ferma se superato)
+#
+# ⚠️  ATTENZIONE: ogni chip BC-250 è diverso per via del binning.
+# NON copiare questi valori senza eseguire bc250_detect.py sul tuo hardware.
+# Comando per trovare i valori del tuo chip:
+#
+#   sudo ~/.venv/bc250/bin/python3 ~/fix/bc250_smu_oc/bc250_detect.py \
+#     -f 3800 -v 1275 -t 90 -k -c /etc/bc250-smu-oc.conf
+#
+# CHANGELOG:
+#   - frequency: 4000 → 3800 MHz
+#     Motivo: a 4000 MHz il picco CPU+GPU durante compilazione shader Vulkan
+#     superava il budget energetico condiviso del chip → crash con schermo nero.
+#     A 3800 MHz il sistema regge lo stress combinato su tutti i titoli testati.
+
+[overclock]
+frequency = 3800
+scale = -12
+max_temperature = 90

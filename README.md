@@ -1,158 +1,179 @@
 # SteamOS BC-250 Restore
 
-Post-update SteamOS restore script for **AMD BC-250 / Cyan Skillfish** (Lenovo Legion Go Gen 1).
+Script di ripristino post-update SteamOS per **AMD BC-250 / Cyan Skillfish** (Lenovo Legion Go Gen 1).
 
-It allows less experienced users to enable and maintain fixes and overclocking on a freshly formatted BC-250 or after every SteamOS update.
+Permette a utenti meno esperti di attivare e mantenere i fix e l'overclock su BC-250 appena formattata o dopo ogni aggiornamento SteamOS.
 
-> **Tested on**: SteamOS 3.9 Holo — Kernel 6.18.x-neptune-618 
-> **Hardware**: AMD BC-250 / Cyan Skillfish (PCI_ID: 1002:13FE)
- 
-> **Gaming validated**: CP2077, RERequiem  — stable, no crashes
+> **Testato su**: SteamOS 3.9 Holo — Kernel 6.18.x-neptune-618  
+> **Hardware**: AMD BC-250 / Cyan Skillfish (PCI_ID: 1002:13FE)  
+> **Validato gaming**: CP2077, RE4 Remake, Horizon Zero Dawn Remastered, Diablo IV — stabile, nessun crash
 
 ---
 
-## What the script does
+## Cosa fa lo script
 
-| Step | Component | Status |
+| Step | Componente | Stato |
 |------|-----------|-------|
-| 1 | Fix ACPI P-States/C-States via `mkinitcpio acpi_override` | ✅ Stable |
-| 2 | Remove `cpu-performance.service` (causes GPU artifacts) | ✅ Stable |
-| 3 | Persistent `schedutil` CPU governor via systemd | ✅ Stable |
-| 4 | `bc250_smu_oc` CPU OC via Python venv | ✅ Stable |
-| 5 | `cyan-skillfish-governor-smu` v0.4.6 GPU governor | ✅ Validated |
-| 6 | D-Bus policy `com.cyan.SkillFishGovernor` | ✅ Stable |
-| 7 | Governor tuning for stable 1080p/60fps | 🔄 In progress |
-| 8 | Unlock 40 CUs | 📋 Future |
+| 1 | Fix ACPI P-States/C-States via `mkinitcpio acpi_override` | ✅ Stabile |
+| 2 | Rimozione `cpu-performance.service` (causa artefatti GPU) | ✅ Stabile |
+| 3 | CPU governor `schedutil` persistente via systemd | ✅ Stabile |
+| 4 | `bc250_smu_oc` CPU OC 3800 MHz via Python venv | ✅ Validato |
+| 5 | `cyan-skillfish-governor-smu` v0.4.6 GPU governor | ✅ Validato |
+| 6 | Policy D-Bus `com.cyan.SkillFishGovernor` | ✅ Stabile |
+| 7 | Tuning governor per 60fps stabili | 🔄 In corso |
+| 8 | Sblocco 40 CU | 📋 Futuro |
 
 ---
 
-## Quick installation
+## Installazione rapida
 
 ```bash
-# 1. Clone the repo
+# 1. Clona il repo
 git clone https://github.com/mrsasy89/steamos-bc250-restore.git ~/fix/restore
 cd ~/fix/restore
 
-# 2. Make the script executable
+# 2. Rendi lo script eseguibile
 chmod +x restore-bc250-steamos.sh
 
-# 3. Run as user deck (uses sudo internally where necessary)
+# 3. Esegui
 ./restore-bc250-steamos.sh
 
-# 4. Reboot to activate the ACPI tables and D-Bus policy
+# 4. Riavvia per attivare ACPI e policy D-Bus
 reboot
 ```
 
 ---
 
-## First boot: manual steps
-
-Some components require manual configuration the first time:
+## Primo avvio: passi manuali
 
 ### bc250_smu_oc (CPU OC)
 
 ```bash
-# Detect the stable profile for your chip
+# Detect del profilo stabile per il tuo chip — OBBLIGATORIO
+# Ogni BC-250 è diverso, NON usare valori di esempio senza detect
 sudo ~/.venv/bc250/bin/python3 ~/fix/bc250_smu_oc/bc250_detect.py \
-  -f 4000 -v 1275 -t 90 -k -c /etc/bc250-smu-oc.conf
+  -f 3800 -v 1275 -t 90 -k -c /etc/bc250-smu-oc.conf
 
-# Apply and install the service
+# Applica e installa il servizio
 sudo ~/.venv/bc250/bin/python3 ~/fix/bc250_smu_oc/bc250_apply.py \
   --apply --install /etc/bc250-smu-oc.conf
 ```
 
+Vedi `bc250-smu-oc.conf.example` per il formato del file e i valori di riferimento.
+
 ### cyan-skillfish-governor-smu (GPU governor)
 
-The v0.4.6 binary is automatically installed by the script.
-The configuration is copied from `config.toml` (this repo) to `/etc/cyan-skillfish-governor-smu/config.toml`.
-
 ```bash
-# Copy the validated config
+# Copia il config validato
 sudo cp config.toml /etc/cyan-skillfish-governor-smu/config.toml
 
-# Start and enable at boot
+# Avvia e abilita al boot
 sudo systemctl enable --now cyan-skillfish-governor-smu
 
-# Verify
+# Verifica
 systemctl status cyan-skillfish-governor-smu --no-pager -l
 ```
 
-Expected log with correct configuration:
+Log atteso:
 ```
-INFO GPU usage method: busy-flag set method: smu
-INFO SMU communication verified
-INFO D-Bus service thread started
-INFO allowed frequency range 1000..=2000
-INFO D-Bus performance mode service ready
+INFO  GPU usage method: busy-flag set method: smu
+INFO  SMU communication verified
+INFO  D-Bus service thread started
+INFO  allowed frequency range 1000..=2000
+INFO  D-Bus performance mode service ready
 ```
 
 ---
 
-## GPU governor profile (config.toml)
+## Profilo CPU OC (bc250-smu-oc.conf)
 
-**Profile: performance-stable v3** — validated on CP2077 + RE4R
+| Parametro | Valore | Note |
+|-----------|--------|------|
+| frequency | 3800 MHz | trovato con bc250_detect.py |
+| scale | -12 | undervolt ottimale — trovato da detect |
+| max_temperature | 90°C | limite termico detect |
 
-| Frequency | Voltage | Notes |
-|-----------|---------|--- ---|
-| 1000 MHz | 800 mV | idle |
-| 1175 MHz | 850 mV | low transition |
+> ⚠️ **Importante**: a 4000 MHz il picco CPU+GPU durante la compilazione shader Vulkan
+> supera il budget energetico condiviso del chip → crash con schermo nero.
+> 3800 MHz è il punto bilanciato validato su tutti i titoli testati.
+
+---
+
+## Profilo GPU governor (config.toml)
+
+**Profilo: performance-balanced v5** — validato CP2077, RE4R, Horizon Zero Dawn Remastered, Diablo IV
+
+| Frequenza | Voltage | Note |
+|-----------|---------|------|
+| 1000 MHz | 800 mV | idle / compilazione shader |
+| 1175 MHz | 850 mV | transizione bassa |
 | 1500 MHz | 900 mV | mid |
 | 1700 MHz | 920 mV | pre-gaming |
-| 1850 MHz | 930 mV | stable gaming |
-| 2000 MHz | 960 mV | main gaming ✅ validated |
+| 1850 MHz | 930 mV | gaming stabile |
+| 2000 MHz | 960 mV | gaming principale ✅ validato |
 
-Safe-points from: [filippor/cyan-skillfish-governor smu branch](https://github.com/filippor/cyan-skillfish-governor/blob/smu/default-config.toml)
+> ⚠️ **CRITICO**: `min = 1000` è obbligatorio. Con `min = 1500` il governor mantiene
+> la GPU a 1500 MHz anche durante la compilazione shader, sommando il consumo
+> CPU+GPU e causando crash con schermo nero.
+
+Safe-points da: [filippor/cyan-skillfish-governor ramo smu](https://github.com/filippor/cyan-skillfish-governor/blob/smu/default-config.toml)
 
 ---
 
-## Important Technical Notes
+## Compilazione shader Vulkan — spiegazione crash
 
-### Never do
-- ❌ `sudo systemctl restart dbus` — **freezes SteamOS** (hard reset required)
-- ❌ Modify `/boot/grub.cfg` for ACPI — the path is relative to btrfs, not EFI
-- ❌ `pip install --break-system-packages` — blocked by PEP 668 on Python 3.13
-- ❌ `cpu-performance.service` with ACPI P-States enabled — causes GPU artifacts
+La compilazione shader è **100% CPU-bound** — la GPU non è coinvolta.
+Il driver AMD converte gli shader su CPU usando tutti i thread disponibili (90-95% CPU).
 
-### PEP 668 — Python on SteamOS
-SteamOS uses Python 3.13 with an “externally managed” environment. The only correct method is:
+Su BC-250, CPU e GPU **condividono lo stesso die e lo stesso budget energetico**.
+Se il governor GPU spinge a frequenze alte mentre la CPU è già al massimo,
+la somma supera il budget → crash con schermo nero.
+
+**Soluzione adottata**: `min = 1000` nel config.toml + CPU OC a 3800 MHz invece di 4000.
+
+---
+
+## Note tecniche importanti
+
+### Non fare mai
+- ❌ `sudo systemctl restart dbus` — **congela SteamOS** (hard reset necessario)
+- ❌ Modificare `/boot/grub.cfg` per ACPI — il path è relativo a btrfs, non EFI
+- ❌ `pip install --break-system-packages` — bloccato da PEP 668 su Python 3.13
+- ❌ `cpu-performance.service` con P-States ACPI attivi — causa artefatti GPU
+- ❌ `min = 1500` nel governor — causa crash durante compilazione shader Vulkan
+
+### PEP 668 — Python su SteamOS
 ```bash
 python3 -m venv ~/.venv/bc250
 ```
-The venv survives SteamOS updates.
-
-### SteamOS Keyring
-```bash
-sudo pacman-key --init
-sudo pacman-key --populate holo
-```
-Required for pacman on SteamOS — standard Arch keys do not cover packages signed by Valve.
-
-### ACPI override
-The `acpi_override` hook goes in the drop-in `/etc/mkinitcpio.conf.d/20-steamdeck.conf`, **not** in the main `mkinitcpio.conf` (it gets overwritten by updates).
+Il venv sopravvive agli update SteamOS.
 
 ### D-Bus policy
-After writing the policy to `/etc/dbus-1/system.d/`, a **reboot** is required to load it. `systemctl restart dbus` freezes the system on SteamOS.
+Dopo aver scritto la policy in `/etc/dbus-1/system.d/`, è necessario un **riavvio**.
+`systemctl restart dbus` congela il sistema su SteamOS.
 
 ### scaling_available_frequencies
-Shows only ACPI P-States (max 3200 MHz). GPU overclocking via SMU operates at the hardware level and bypasses this limit — this is normal. To check the actual GPU frequency, use the in-game monitor or `radeontop`.
+Mostra solo i P-States ACPI (max 3200 MHz). L'OC GPU via SMU agisce a livello
+hardware — per la frequenza reale usare il monitor in-game o `radeontop`.
 
 ### cyan-skillfish-governor-smu v0.4.6
-The v0.4.6 tarball **does not include** `scripts/cyan-skillfish-performance-mode` — `install.sh` fails on that file. The script uses a manual installation that skips that non-critical part.
+Il tar v0.4.6 non include `scripts/cyan-skillfish-performance-mode` — `install.sh`
+fallisce su quel file. Lo script usa installazione manuale che salta quella parte.
 
 ---
 
-## Important paths
+## Path importanti
 
 ```
-/etc/cyan-skillfish-governor-smu/config.toml # GPU governor config
-/etc/cyan-skillfish-governor-smu/cyan-skillfish-governor-smu # binary
+/etc/cyan-skillfish-governor-smu/config.toml    # config GPU governor
+/etc/cyan-skillfish-governor-smu/cyan-skillfish-governor-smu  # binario
 /etc/systemd/system/cyan-skillfish-governor-smu.service
 /etc/dbus-1/system.d/com.cyan.SkillFishGovernor.conf
-/etc/bc250-smu-oc.conf # CPU OC profile
-~/.venv/bc250/ # Python venv bc250_smu_oc
-~/fix/bc250_smu_oc/ # bc250_smu_oc sources
-/etc/mkinitcpio.conf.d/20-steamdeck.conf # mkinitcpio drop-in
-/etc/initcpio/acpi_override/ # ACPI .aml tables
+/etc/bc250-smu-oc.conf                          # profilo CPU OC
+~/.venv/bc250/                                  # Python venv bc250_smu_oc
+~/fix/bc250_smu_oc/                             # sorgenti bc250_smu_oc
+/etc/mkinitcpio.conf.d/20-steamdeck.conf        # drop-in mkinitcpio
+/etc/initcpio/acpi_override/                    # tabelle ACPI .aml
 ```
 
 ---
@@ -161,17 +182,18 @@ The v0.4.6 tarball **does not include** `scripts/cyan-skillfish-performance-mode
 
 - [x] Fix ACPI P-States/C-States
 - [x] CPU governor schedutil
-- [x] bc250_smu_oc CPU OC (4000 MHz @ 1275 mV)
-- [x] cyan-skillfish-governor-smu v0.4.6 installed and validated
-- [x] GPU governor 1000-2000 MHz official safe points
-- [ ] **Next**: Governor tuning for stable 1080p/60fps targets on AAA titles
-- [ ] **Future**: Unlock 40 CUs (Compute Units disabled via binning)
+- [x] bc250_smu_oc CPU OC (3800 MHz, scale=-12)
+- [x] cyan-skillfish-governor-smu v0.4.6 installato e validato
+- [x] GPU governor 1000-2000 MHz — validato su 4 titoli AAA
+- [x] Profilo bilanciato CPU+GPU — compilazione shader Vulkan stabile
+- [ ] **Prossimo**: Tuning governor per target 60fps stabili su titoli AAA
+- [ ] **Futuro**: Sblocco 40 CU (Compute Unit disabilitate via binning)
 
 ---
 
-## References
+## Riferimenti
 
-- [filippor/cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) — `smu` branch
+- [filippor/cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) — ramo `smu`
 - [bc250-collective/bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc)
 - [elektricm.github.io/amd-bc250-docs](https://elektricm.github.io/amd-bc250-docs/)
 - [cyan-skillfish-governor-smu AUR](https://aur.archlinux.org/packages/cyan-skillfish-governor-smu)

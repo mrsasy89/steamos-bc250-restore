@@ -1,14 +1,24 @@
-# cyan-skillfish-governor-smu — Profilo: performance-stable v3
-# Safe-points da: filippor/cyan-skillfish-governor ramo smu (ufficiale)
-# Testato con: CP2077, Resident Evil 4 Remake — stabile, nessun crash
+# cyan-skillfish-governor-smu — Profilo: performance-balanced v5
+# Profilo DEFINITIVO validato su Lenovo Legion Go Gen 1 / AMD BC-250
 # Data validazione: 05 giu 2026
 #
-# CHANGELOG rispetto a v2:
-#   - Voltage 2000 MHz: 1000mV → 960mV (corretto su valori ufficiali)
-#   - Aggiunti safe-points intermedi: 1175/850, 1700/920, 1850/930
-#   - Rimossi 2150/2200 MHz (non validati, commentati nei sorgenti ufficiali)
-#   - max frequency: 2200 → 2000 MHz (primo step stabile prima di OC avanzato)
-#   - burst-samples: 60 → 25 (più reattivo in gaming)
+# Testato con: CP2077, Resident Evil 4 Remake, Horizon Zero Dawn Remastered, Diablo IV
+# Risultato: stabile, nessun crash, compilazione shader Vulkan OK
+#
+# CHANGELOG rispetto a v4:
+#   - min frequency: 1500 → 1000 (lascia headroom CPU durante compilazione shader)
+#   - max frequency: 2100 → 2000 (profilo bilanciato CPU+GPU)
+#   - burst-samples: 15 → 25 (meno aggressivo nel ramp-up)
+#   - down-events: 40 → 30 (bilanciato tra stabilità FPS e risparmio)
+#   - upper: 0.85 → 0.90 (sale di freq solo con GPU davvero satura)
+#
+# LEZIONE APPRESA — Compilazione shader Vulkan:
+#   La compilazione shader è 100% CPU-bound (CPU 90-95%, GPU quasi idle).
+#   Con min=1500 il governor teneva la GPU a 1500 MHz anche durante la compilazione,
+#   sommando consumo CPU+GPU e crashando il sistema con schermo nero.
+#   Con min=1000 la GPU scende a idle durante la compilazione — nessun crash.
+#
+# Abbinato a: CPU OC 3800 MHz, scale=-12 (trovato da bc250_detect.py)
 
 [timing.intervals]
 sample = 500
@@ -30,34 +40,34 @@ normal = 1
 burst = 50
 
 [timing]
-burst-samples = 25        # più reattivo in gaming vs default 60
-down-events = 20          # resistenza downscale — default doc = 5
+burst-samples = 25        # reattivo in gaming, non aggressivo in compile
+down-events = 30          # bilanciato — default doc = 5
 
 [frequency-thresholds]
 adjust = 10
 
 [load-target]
-upper = 0.80
-lower = 0.60              # mantiene freq più a lungo sotto carico
+upper = 0.90              # sale di freq solo con GPU davvero satura
+lower = 0.70              # mantiene freq sotto carico, evita oscillazioni FPS
 
 [temperature]
 throttling = 83           # limite termico confermato su Lenovo Legion Go Gen1
 throttling_recovery = 73
 
 [frequency-range]
-min = 1000
-max = 2000                # step stabile validato — prossimo: 2150/2200 con voltage corretti
+min = 1000                # CRITICO: 1000 non 1500 — lascia headroom CPU durante shader compile
+max = 2000                # profilo bilanciato definitivo — prossimo step: 2100 dopo ulteriori test
 
 # Curva validata — safe-points ufficiali filippor/cyan-skillfish-governor ramo smu
 # Fonte: https://github.com/filippor/cyan-skillfish-governor/blob/smu/default-config.toml
 
 [[safe-points]]
 frequency = 1000
-voltage = 800             # idle
+voltage = 800             # idle / compilazione shader
 
 [[safe-points]]
 frequency = 1175
-voltage = 850             # transizione bassa (punto ufficiale)
+voltage = 850             # transizione bassa
 
 [[safe-points]]
 frequency = 1500
@@ -65,22 +75,27 @@ voltage = 900             # mid
 
 [[safe-points]]
 frequency = 1700
-voltage = 920             # pre-gaming (punto ufficiale)
+voltage = 920             # pre-gaming
 
 [[safe-points]]
 frequency = 1850
-voltage = 930             # gaming stabile (punto ufficiale)
+voltage = 930             # gaming stabile
 
 [[safe-points]]
 frequency = 2000
-voltage = 960             # gaming principale — validato CP2077 + RE4R
+voltage = 960             # gaming principale — validato tutti i titoli testati
 
-# Step futuri OC avanzato (non attivare senza test termici)
+# Step futuri OC avanzato (non attivare senza test termici approfonditi)
+# Abbinare sempre a CPU OC stabile — verificare temperature sotto stress combinato
 # Fonte voltage: filippor/cyan-skillfish-governor default-config.toml
 #
 # [[safe-points]]
 # frequency = 2050
 # voltage = 980
+#
+# [[safe-points]]
+# frequency = 2100
+# voltage = 1000
 #
 # [[safe-points]]
 # frequency = 2150
