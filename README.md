@@ -1,6 +1,6 @@
 # SteamOS BC-250 Restore
 
-Post-update SteamOS restore script for **AMD BC-250 / Cyan Skillfish**.
+Post-update SteamOS restore script for **ASRock BC-250 / Cyan Skillfish**.
 
 It allows less experienced users to enable and maintain fixes and overclocking on a freshly formatted BC-250 or after every SteamOS update.
 
