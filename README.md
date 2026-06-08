@@ -22,7 +22,6 @@ It allows less experienced users to enable and maintain fixes and overclocking o
 | 6 | D-Bus policy `com.cyan.SkillFishGovernor` | ✅ Stable |
 | 7 | Governor tuning for stable 60fps | 🔄 In progress |
 | 8 | Unlock 40 CUs | 📋 Future |
-
 ---
 
 ## Quick installation
@@ -101,7 +100,7 @@ INFO  D-Bus performance mode service ready
 
 ## GPU governor profile (config.toml)
 
-**Profile: performance-balanced v5** — validated on CP2077, RE4R, Horizon Zero Dawn Remastered, Diablo IV
+**Profile: performance-balanced v5** — validated on CP2077, RERequiem, Horizon Zero Dawn Remastered, Diablo IV
 
 | Frequency | Voltage | Notes |
 |-------- ---|---------|------|
@@ -130,6 +129,59 @@ If the GPU governor pushes to high frequencies while the CPU is already at maxim
 the total exceeds the budget → crash with black screen.
 
 **Solution adopted**: `min = 1000` in config.toml + CPU OC to 3800 MHz instead of 4000.
+
+---
+
+## After changing the governor profile — Cleanup required
+
+> ⚠️ **Important**: after any change to the CPU/GPU governor profile (e.g. modifying
+> `config.toml` or `bc250-smu-oc.conf`), some games may crash or fail to save.
+> This is caused by a **corrupted Proton prefix** left over from the previous profile,
+> not by the new configuration itself.
+>
+> Validated affected titles: **RE: Requiem** and potentially other Proton-based games
+> that store GPU/CPU-specific data in the prefix.
+
+### Why this happens
+
+Each time you run a game under Proton, Wine records system-level state (registry keys,
+GPU info, D3D/Vulkan caps) inside `compatdata/<APP_ID>`. When the CPU or GPU governor
+profile changes significantly, this cached state becomes stale and causes crashes,
+black screens, or failed saves on next launch.
+
+### Fix: clean compatdata and shadercache
+
+Replace `APP_ID` with the Steam App ID of the affected game (e.g. `3764200` for RE: Requiem):
+
+```bash
+APP_ID=3764200
+
+# 1. Backup and reset the Proton prefix
+mv ~/.local/share/Steam/steamapps/compatdata/${APP_ID} \
+   ~/.local/share/Steam/steamapps/compatdata/${APP_ID}.bak
+
+# 2. Delete the shader cache
+rm -rf ~/.local/share/Steam/steamapps/shadercache/${APP_ID}
+
+# 3. Verify both are gone (output should be empty)
+ls ~/.local/share/Steam/steamapps/compatdata/ | grep ${APP_ID}
+ls ~/.local/share/Steam/steamapps/shadercache/ | grep ${APP_ID}
+```
+
+Launch the game — Steam will recreate a fresh prefix and recompile shaders automatically.
+Allow shader compilation to complete before loading any save.
+
+> 💡 **Tip**: renaming compatdata with `.bak` instead of deleting it preserves your old
+> prefix as a fallback. Restore it at any time by reversing the `mv` command.
+
+### GUI alternative: Storage Cleaner (Decky Loader)
+
+If you use [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader), the
+**Storage Cleaner** plugin provides a visual interface to delete compatdata and
+shadercache per game without using the terminal:
+
+Decky → Store → search "Storage Cleaner" → Install
+Repository: [github.com/mcarlucci/decky-storage-cleaner](https://github.com/mcarlucci/decky-storage-cleaner)
 
 ---
 
@@ -186,14 +238,23 @@ fails on that file. The script uses a manual installation that skips that part.
 - [x] cyan-skillfish-governor-smu v0.4.6 installed and validated
 - [x] GPU governor 1000-2000 MHz — validated on 4 AAA titles
 - [x] Balanced CPU+GPU profile — stable Vulkan shader compilation
-- [ ] **Next**: Governor tuning for stable 60fps targets on AAA titles
+- [x] Documented compatdata/shadercache cleanup after governor changes
+- [ ] **Next**: Governor tuning for stable 60fps — Variant D in testing (`upper=0.80`, `down-events=15`)
+- [ ] **Next**: Per-game FSR/scaling validation table
+- [ ] **Next**: Zswap over Zram — may reduce in-game crashes under memory pressure
+- [ ] **Next**: CPU mitigations tuning — potential performance gain on gaming workloads
 - [ ] **Future**: Unlock 40 CUs (Compute Units disabled via binning)
 
 ---
 
 ## References
 
-- [filippor/cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) — `smu` branch
-- [bc250-collective/bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc)
 - [elektricm.github.io/amd-bc250-docs](https://elektricm.github.io/amd-bc250-docs/)
+- [bc250-collective/amd_smu_reverse_engineering](https://github.com/bc250-collective/amd_smu_reverse_engineering)
+- [bc250-collective/bc250-acpi-fix](https://github.com/bc250-collective/bc250-acpi-fix)
+- [bc250-collective/bc250_smu_oc](https://github.com/bc250-collective/bc250_smu_oc)
+- [filippor/cyan-skillfish-governor](https://github.com/filippor/cyan-skillfish-governor) — `smu` branch
 - [cyan-skillfish-governor-smu AUR](https://aur.archlinux.org/packages/cyan-skillfish-governor-smu)
+- [mcarlucci/decky-storage-cleaner](https://github.com/mcarlucci/decky-storage-cleaner)
+- [Old Lamer — BC-250 Full Guide (YouTube)](https://youtu.be/ajZCscNZbE8)
+- [InnoVision Games — BC 250 ALL 40 CUs on REAL SteamOS! (YouTube)](https://www.youtube.com/watch?v=L88Ws8XEsbY&t)
